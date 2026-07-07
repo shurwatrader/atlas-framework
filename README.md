@@ -38,6 +38,16 @@ python -m http.server 8000   # from the repo root
 - **Strike Orbs** — per-strike heaviness field: the session's heaviest strikes
   each get an orb chain across time, sized by |total GEX| and colored by sign
   (teal positive / purple negative) — toggleable like any level
+- **Δ Flow mode** — flips the orb field from *where structure sits* (net) to
+  *where money is moving* (change vs previous snapshot: building green /
+  draining red — gex-replay's "Movers," drawn on the price chart). The two
+  modes rank strikes independently, so Δ surfaces active strikes that net
+  totals hide
+
+> **Why the orbs sit in one spot in this demo:** an orb column is drawn per
+> captured snapshot, and the sample day only has 14 frames (~28 min of 2-min
+> captures). Run the capture all session — or feed it stored history — and the
+> field fills the whole chart, Atlas-style, with no code changes.
 - **Heatmap sidecar** — latest-frame strike × expiry board docked beside the
   chart (the ~40 heaviest strikes, gex-replay's diverging color scheme),
   toggled from the chip bar

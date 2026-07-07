@@ -7,14 +7,26 @@ import { createAtlasChart } from './chart.js';
 
 const $ = (sel) => document.querySelector(sel);
 
+// Current series state, so orb mode can re-render without refetching.
+const state = { frames: [], lastTime: null, orbMode: 'net' };
+
+function renderOrbs(atlas) {
+  atlas.setStrikeOrbs(
+    buildStrikeOrbs(state.frames, { mode: state.orbMode }),
+    state.lastTime,
+    state.orbMode
+  );
+}
+
 async function loadSeries(atlas, symbol) {
   const { bars, frames, derivedFrom, note } = await sampleAdapter(symbol);
   const { levels, netExposure } = buildLevelSeries(frames);
-  const lastTime = bars[bars.length - 1]?.t;
+  state.frames = frames;
+  state.lastTime = bars[bars.length - 1]?.t;
 
   atlas.setBars(bars);
-  atlas.setLevels(levels, lastTime);
-  atlas.setStrikeOrbs(buildStrikeOrbs(frames), lastTime);
+  atlas.setLevels(levels, state.lastTime);
+  renderOrbs(atlas);
   atlas.fit();
   renderHeatmap(frames[frames.length - 1]);
 
@@ -68,6 +80,18 @@ async function main() {
     atlas.toggleStrikeOrbs(orbChip.classList.toggle('on'))
   );
   togglesEl.appendChild(orbChip);
+
+  // Orb mode: Net (where structure sits) vs Δ Flow (money in/out per interval)
+  const deltaChip = document.createElement('button');
+  deltaChip.className = 'chip';
+  deltaChip.title = 'Orb mode: off = net GEX per strike, on = change vs previous snapshot (building green / draining red)';
+  deltaChip.innerHTML = '<span class="dot" style="background:rgba(102,187,106,0.9)"></span>Δ Flow';
+  deltaChip.addEventListener('click', () => {
+    state.orbMode = deltaChip.classList.toggle('on') ? 'delta' : 'net';
+    renderOrbs(atlas);
+    if (!orbChip.classList.contains('on')) atlas.toggleStrikeOrbs(false);
+  });
+  togglesEl.appendChild(deltaChip);
 
   // Heatmap sidecar toggle
   const hmChip = document.createElement('button');

@@ -119,10 +119,14 @@ export function createAtlasChart(container, flowContainer) {
     /**
      * Strike heaviness — the Atlas orb field.
      * orbs: [{ strike, points: [{time, strength, sign}] }] from buildStrikeOrbs.
-     * Positive GEX renders teal, negative purple (gex-replay's palette);
-     * orb size scales with sqrt(strength / session max).
+     * Orb size scales with sqrt(strength / session max). Palette by mode:
+     *   net   — teal positive GEX / purple negative (gex-replay's scheme)
+     *   delta — green building / red draining (money in vs out per interval)
      */
-    setStrikeOrbs(orbs, extendToTime) {
+    setStrikeOrbs(orbs, extendToTime, mode = 'net') {
+      const palette = mode === 'delta'
+        ? { pos: 'rgba(102,187,106,0.85)', neg: 'rgba(239,83,80,0.85)' }
+        : { pos: 'rgba(38,166,154,0.75)', neg: 'rgba(149,117,205,0.8)' };
       for (const s of orbSeries) chart.removeSeries(s);
       orbSeries = [];
       const maxStrength = Math.max(1, ...orbs.flatMap((o) => o.points.map((p) => p.strength)));
@@ -145,7 +149,7 @@ export function createAtlasChart(container, flowContainer) {
               time: p.time,
               position: 'inBar',
               shape: 'circle',
-              color: p.sign >= 0 ? 'rgba(38,166,154,0.75)' : 'rgba(149,117,205,0.8)',
+              color: p.sign >= 0 ? palette.pos : palette.neg,
               size: 0.15 + 1.85 * Math.sqrt(p.strength / maxStrength),
             }))
         );

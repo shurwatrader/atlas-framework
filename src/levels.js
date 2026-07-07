@@ -97,41 +97,61 @@ export function findGexZero(totals, spot) {
 }
 
 /**
- * Per-strike "heaviness" — the Atlas orb field. For every strike that
- * matters (top maxStrikes by peak |total GEX| across the session), emit one
- * point per frame carrying its magnitude and sign, so the chart can draw an
- * orb chain at that strike sized by node strength.
+ * Per-strike "heaviness" — the Atlas orb field.
+ *
+ * Two modes:
+ *   'net'   — orb strength = |total GEX| at that snapshot: where structure
+ *             SITS. Sign = GEX sign (teal positive / purple negative).
+ *   'delta' — orb strength = |change in total GEX| vs the previous snapshot:
+ *             where money is FLOWING in or out right now (gex-replay's
+ *             "Movers" concept). Sign = direction of the change
+ *             (building = +, draining = −). First frame has no delta.
+ *
+ * Strikes are ranked by session-peak strength in the chosen mode, top
+ * maxStrikes kept.
  *
  * @returns [{ strike, points: [{ time, strength, sign }] }]
  */
-export function buildStrikeOrbs(frames, { maxStrikes = 14 } = {}) {
-  // Rank strikes by their session-peak magnitude.
-  const peak = new Map();
+export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net' } = {}) {
   const perFrame = frames.map((frame) => {
     const time = Math.floor(Date.parse(frame.capturedAt) / 1000);
     const totals = new Map();
     for (const row of frame.rows) {
-      const total = row.values.reduce((s, v) => s + parseValue(v.text), 0);
-      totals.set(row.strike, total);
-      const abs = Math.abs(total);
-      if (abs > (peak.get(row.strike) ?? 0)) peak.set(row.strike, abs);
+      totals.set(row.strike, row.values.reduce((s, v) => s + parseValue(v.text), 0));
     }
     return { time, totals };
   });
 
-  const top = [...peak.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxStrikes)
-    .map(([strike]) => strike)
-    .sort((a, b) => a - b);
-
-  return top.map((strike) => ({
-    strike,
-    points: perFrame.map(({ time, totals }) => {
+  // Per-strike point series in the chosen mode.
+  const strikes = new Set(perFrame.flatMap((f) => [...f.totals.keys()]));
+  const built = new Map();
+  for (const strike of strikes) {
+    const points = [];
+    for (let i = 0; i < perFrame.length; i++) {
+      const { time, totals } = perFrame[i];
       const total = totals.get(strike) ?? 0;
-      return { time, strength: Math.abs(total), sign: Math.sign(total) };
-    }),
-  }));
+      if (mode === 'delta') {
+        if (i === 0) continue; // no previous frame to diff against
+        const prev = perFrame[i - 1].totals.get(strike) ?? 0;
+        const d = total - prev;
+        points.push({ time, strength: Math.abs(d), sign: Math.sign(d) });
+      } else {
+        points.push({ time, strength: Math.abs(total), sign: Math.sign(total) });
+      }
+    }
+    built.set(strike, points);
+  }
+
+  return [...built.entries()]
+    .map(([strike, points]) => ({
+      strike,
+      points,
+      peak: Math.max(0, ...points.map((p) => p.strength)),
+    }))
+    .sort((a, b) => b.peak - a.peak)
+    .slice(0, maxStrikes)
+    .sort((a, b) => a.strike - b.strike)
+    .map(({ strike, points }) => ({ strike, points }));
 }
 
 /**
