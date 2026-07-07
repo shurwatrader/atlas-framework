@@ -16,6 +16,7 @@ async function main() {
   atlas.setBars(bars);
   atlas.setLevels(levels, bars[bars.length - 1]?.t);
   atlas.fit();
+  window.__atlas = atlas; // dev/debug handle
 
   // Header readout
   const last = bars[bars.length - 1];

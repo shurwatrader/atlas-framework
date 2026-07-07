@@ -91,6 +91,30 @@ Push messages, each one of:
 Atlas appends in place — Lightweight Charts handles incremental `update()`
 natively.
 
+## 6. Dark pool levels — `GET /api/v1/darkpool/{symbol}` (optional)
+
+Skylit's Atlas overlays dark pool levels alongside dealer positioning. If a
+prints source exists (or is licensed later), the shape is simple:
+
+```jsonc
+{ "symbol": "MU",
+  "levels": [
+    { "price": 950.00, "notional": 4.1e8, "prints": 12, "lastSeen": "2026-07-05T19:55:00Z" }
+  ] }
+```
+
+Rendered as horizontal lines weighted by notional. Purely additive — nothing
+else depends on it.
+
+## Derived mapping (cross-product levels)
+
+Skylit's "Derived Orbs" let futures borrow options structure from related
+products (ES ← SPY/SPXW, NQ ← QQQ), adjusted for basis drift ("the wiggle").
+For Quantum the equivalent would be SPX ↔ SPY ↔ ES. This needs no new data —
+only a per-pair `ratio` (and optionally a live basis offset) served alongside
+the board, e.g. `{ "derivedFrom": "SPY", "ratio": 10.02 }`. The adapter
+multiplies strikes through the ratio before handing levels to the chart.
+
 ## Minimum viable subset
 
 If only **one** endpoint can be built first, make it **#3 (level history)** at

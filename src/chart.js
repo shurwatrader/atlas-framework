@@ -2,7 +2,10 @@
  * chart.js — all rendering. Wraps TradingView Lightweight Charts (CDN, MIT).
  *
  * Layout mirrors Atlas:
- *   main pane  — candlesticks + dashed GEX/VEX level lines stepping through time
+ *   main pane  — candlesticks + GEX/VEX levels rendered as dotted step lines
+ *                with "orbs" (circle markers sized by node strength — a lite
+ *                version of Skylit's Orbs Classic, where brightness/size
+ *                encodes node strength)
  *   flow pane  — histogram (demo: signed candle volume; production: real
  *                signed options flow — see README "What's still needed")
  */
@@ -73,17 +76,35 @@ export function createAtlasChart(container, flowContainer) {
       })));
     },
 
-    /** levels: map key -> [{time, value}] from levels.buildLevelSeries */
+    /** levels: map key -> [{time, value, strength}] from levels.buildLevelSeries */
     setLevels(levels, extendToTime) {
+      // Normalize orb size against the strongest node across all levels,
+      // so relative strength is comparable between walls/kings.
+      const maxStrength = Math.max(
+        1,
+        ...Object.values(levels).flatMap((pts) => pts.map((p) => p.strength ?? 0))
+      );
       for (const [key, points] of Object.entries(levels)) {
         if (!levelSeries[key]) continue;
-        const data = [...points];
+        const data = points.map(({ time, value }) => ({ time, value }));
         // Extend the last known level to the right edge so it reads as an
-        // active level, like Atlas' dotted lines running ahead of price.
+        // active level, like Atlas' orb chains running ahead of price.
         if (data.length && extendToTime && extendToTime > data[data.length - 1].time) {
           data.push({ time: extendToTime, value: data[data.length - 1].value });
         }
         levelSeries[key].setData(data);
+        // Orbs-lite: one circle per snapshot, sized by node strength.
+        levelSeries[key].setMarkers(
+          points
+            .filter((p) => (p.strength ?? 0) > 0)
+            .map((p) => ({
+              time: p.time,
+              position: 'inBar',
+              shape: 'circle',
+              color: LEVEL_STYLES[key].color,
+              size: 0.4 + 1.6 * Math.sqrt(p.strength / maxStrength),
+            }))
+        );
       }
     },
 
@@ -92,6 +113,7 @@ export function createAtlasChart(container, flowContainer) {
     },
 
     fit() { chart.timeScale().fitContent(); },
+    zoom(from, to) { chart.timeScale().setVisibleRange({ from, to }); },
     styles: LEVEL_STYLES,
   };
 }

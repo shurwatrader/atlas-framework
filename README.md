@@ -24,6 +24,8 @@ python -m http.server 8000   # from the repo root
 ## What the demo shows
 
 - **Candlestick chart** (real MU 5m OHLCV, all sessions incl. overnight)
+- **Orbs-lite** — each level draws a circle per snapshot, sized by node
+  strength (Skylit's Orbs encode strength as brightness/size; same idea)
 - **Dealer levels as stepped dotted lines**, one point per GEX snapshot:
   - **Call Wall** — strike with the largest positive total GEX
   - **Put Wall** — strike with the most negative total GEX
@@ -77,7 +79,27 @@ a real Quantum feed means implementing **one function** (`quantumAdapter` in
 | **Live updates** | static JSON | WebSocket push of new bars + level updates |
 | **OHLCV bars** | pulled from a broker API for the demo | terminal-native bars keep it one data source |
 
-## Ideas beyond parity (where Atlas could beat Heatseeker)
+## Feature map vs. the real Atlas ([docs.skylit.ai/atlas](https://docs.skylit.ai/atlas/overview))
+
+Skylit's Atlas "brings Skylit data directly onto the chart so users can review
+price action, dealer positioning, dark pool levels, and options-flow context
+in one place." How this framework maps onto their published feature set:
+
+| Skylit Atlas feature | Status here | Notes |
+|---|---|---|
+| **Orbs Classic** (strength = brightness) | ✅ lite version | circle markers sized by node strength, normalized per session |
+| **Orbs V2** (Min/Max Clamp size/opacity controls) | roadmap | needs a settings panel; sizing math already in `chart.js` |
+| **Exposure views: GEX / VEX / GEX+VEX / Derived** | GEX-OI only | pure data availability — the toggle architecture is in place |
+| **Expiration selection** (per-expiry levels) | roadmap | scrape already carries per-expiry values; levels.js currently sums across expiries |
+| **Flowseeker pane** (options volume under price) | placeholder | needs real flow feed (DATA_CONTRACT §4) |
+| **Dark pool levels** | not started | needs a dark-pool prints source (DATA_CONTRACT §6) |
+| **Derived Orbs** (ES borrows SPY/SPXW, NQ borrows QQQ, adjusted for "the wiggle") | not started | cross-product mapping = a ratio/offset transform in the adapter layer |
+| **Scroll as Replay** (only data known at that time) | natural fit | levels are already time-stamped snapshots; gex-replay's scrubber UX plugs in |
+| **Projections (beta)** (forward price-gravity zones) | idea stage | gex-replay's migration scoring is a starting point |
+| **Sidecars** (heatmap / Trinity cross-market) | natural fit | the gex-replay heatmap *is* the sidecar — dock it beside the chart |
+| **Chart layouts** (named, auto-saved, synced) | not started | localStorage first, account sync later |
+
+## Ideas beyond parity (where this could beat Heatseeker)
 
 - **Level-touch alerting** — notify when price approaches a wall/GEX0, with the
   level's *strength* (magnitude, freshness, trajectory) attached.

@@ -45,12 +45,12 @@ export function deriveLevels(frame) {
     .sort((a, b) => a.strike - b.strike);
 
   let callWall = null, putWall = null, oiKing = null, volKing = null;
-  let maxPos = 0, minNeg = 0;
+  let maxPos = 0, minNeg = 0, oiKingGex = 0, volKingGex = 0;
   for (const t of totals) {
     if (t.total > maxPos) { maxPos = t.total; callWall = t.strike; }
     if (t.total < minNeg) { minNeg = t.total; putWall = t.strike; }
-    if (t.row.values.some((v) => v.oiKing)) oiKing = t.strike;
-    if (t.row.values.some((v) => v.volKing)) volKing = t.strike;
+    if (t.row.values.some((v) => v.oiKing)) { oiKing = t.strike; oiKingGex = Math.abs(t.total); }
+    if (t.row.values.some((v) => v.volKing)) { volKing = t.strike; volKingGex = Math.abs(t.total); }
   }
 
   return {
@@ -61,6 +61,15 @@ export function deriveLevels(frame) {
     oiKing,
     volKing,
     gex0: findGexZero(totals, spot),
+    // Node strengths — fuel for orb sizing (Atlas "Orbs": size/brightness
+    // encodes node strength). GEX0 has no magnitude; it's a crossing.
+    strength: {
+      callWall: maxPos,
+      putWall: Math.abs(minNeg),
+      oiKing: oiKingGex,
+      volKing: volKingGex,
+      gex0: 0,
+    },
     netExposure: frame.netExposureValue ?? parseValue(String(frame.netExposure).replace(/[$,]/g, '')),
   };
 }
@@ -99,7 +108,7 @@ export function buildLevelSeries(frames) {
   for (const frame of frames) {
     const lv = deriveLevels(frame);
     for (const k of keys) {
-      if (lv[k] != null) series[k].push({ time: lv.time, value: lv[k] });
+      if (lv[k] != null) series[k].push({ time: lv.time, value: lv[k], strength: lv.strength[k] });
     }
     net.push({ time: lv.time, value: lv.netExposure });
   }
