@@ -35,6 +35,12 @@ python -m http.server 8000   # from the repo root
 - **Candlestick chart** (real 5m OHLCV, all sessions incl. overnight)
 - **Orbs-lite** — each level draws a circle per snapshot, sized by node
   strength (Skylit's Orbs encode strength as brightness/size; same idea)
+- **Strike Orbs** — per-strike heaviness field: the session's heaviest strikes
+  each get an orb chain across time, sized by |total GEX| and colored by sign
+  (teal positive / purple negative) — toggleable like any level
+- **Heatmap sidecar** — latest-frame strike × expiry board docked beside the
+  chart (the ~40 heaviest strikes, gex-replay's diverging color scheme),
+  toggled from the chip bar
 - **Dealer levels as stepped dotted lines**, one point per GEX snapshot:
   - **Call Wall** — strike with the largest positive total GEX
   - **Put Wall** — strike with the most negative total GEX
@@ -96,7 +102,7 @@ in one place." How this framework maps onto their published feature set:
 
 | Skylit Atlas feature | Status here | Notes |
 |---|---|---|
-| **Orbs Classic** (strength = brightness) | ✅ lite version | circle markers sized by node strength, normalized per session |
+| **Orbs Classic** (strength = brightness) | ✅ lite version | level orbs + per-strike Strike Orbs field, sized by node strength, normalized per session |
 | **Orbs V2** (Min/Max Clamp size/opacity controls) | roadmap | needs a settings panel; sizing math already in `chart.js` |
 | **Exposure views: GEX / VEX / GEX+VEX / Derived** | GEX-OI only | pure data availability — the toggle architecture is in place |
 | **Expiration selection** (per-expiry levels) | roadmap | scrape already carries per-expiry values; levels.js currently sums across expiries |
@@ -105,7 +111,7 @@ in one place." How this framework maps onto their published feature set:
 | **Derived Orbs** (ES borrows SPY/SPXW, NQ borrows QQQ, adjusted for "the wiggle") | not started | cross-product mapping = a ratio/offset transform in the adapter layer |
 | **Scroll as Replay** (only data known at that time) | natural fit | levels are already time-stamped snapshots; gex-replay's scrubber UX plugs in |
 | **Projections (beta)** (forward price-gravity zones) | idea stage | gex-replay's migration scoring is a starting point |
-| **Sidecars** (heatmap / Trinity cross-market) | natural fit | the gex-replay heatmap *is* the sidecar — dock it beside the chart |
+| **Sidecars** (heatmap / Trinity cross-market) | ✅ heatmap sidecar | latest-frame strike × expiry board docked beside the chart; Trinity (cross-market) = same panel × 3 symbols |
 | **Chart layouts** (named, auto-saved, synced) | not started | localStorage first, account sync later |
 
 ## Ideas beyond parity (where this could beat Heatseeker)

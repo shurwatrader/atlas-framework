@@ -56,6 +56,10 @@ export function createAtlasChart(container, flowContainer) {
 
   const flow = flowChart.addHistogramSeries({ priceFormat: { type: 'volume' } });
 
+  // Per-strike orb field: one invisible line series per heavy strike, whose
+  // markers are the orbs (size = node strength, color = GEX sign).
+  let orbSeries = [];
+
   // Keep both panes' time axes locked together.
   chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
     if (r) flowChart.timeScale().setVisibleLogicalRange(r);
@@ -110,6 +114,47 @@ export function createAtlasChart(container, flowContainer) {
 
     toggleLevel(key, visible) {
       levelSeries[key]?.applyOptions({ visible });
+    },
+
+    /**
+     * Strike heaviness — the Atlas orb field.
+     * orbs: [{ strike, points: [{time, strength, sign}] }] from buildStrikeOrbs.
+     * Positive GEX renders teal, negative purple (gex-replay's palette);
+     * orb size scales with sqrt(strength / session max).
+     */
+    setStrikeOrbs(orbs, extendToTime) {
+      for (const s of orbSeries) chart.removeSeries(s);
+      orbSeries = [];
+      const maxStrength = Math.max(1, ...orbs.flatMap((o) => o.points.map((p) => p.strength)));
+      for (const { strike, points } of orbs) {
+        const series = chart.addLineSeries({
+          color: 'rgba(0,0,0,0)', // orbs only — no connecting line
+          lastValueVisible: false,
+          priceLineVisible: false,
+          crosshairMarkerVisible: false,
+        });
+        const data = points.map(({ time }) => ({ time, value: strike }));
+        if (data.length && extendToTime && extendToTime > data[data.length - 1].time) {
+          data.push({ time: extendToTime, value: strike });
+        }
+        series.setData(data);
+        series.setMarkers(
+          points
+            .filter((p) => p.strength > 0)
+            .map((p) => ({
+              time: p.time,
+              position: 'inBar',
+              shape: 'circle',
+              color: p.sign >= 0 ? 'rgba(38,166,154,0.75)' : 'rgba(149,117,205,0.8)',
+              size: 0.15 + 1.85 * Math.sqrt(p.strength / maxStrength),
+            }))
+        );
+        orbSeries.push(series);
+      }
+    },
+
+    toggleStrikeOrbs(visible) {
+      for (const s of orbSeries) s.applyOptions({ visible });
     },
 
     fit() { chart.timeScale().fitContent(); },

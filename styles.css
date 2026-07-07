@@ -83,7 +83,29 @@ header {
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 
 main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0 8px; }
+.chart-row { flex: 1; display: flex; min-height: 0; gap: 8px; }
+.chart-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 #chart { flex: 3; min-height: 0; }
+
+.sidecar {
+  width: 340px;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  padding: 4px 0 4px 8px;
+}
+.sidecar.hidden { display: none; }
+.sidecar-title { font-size: 11px; letter-spacing: 2px; color: var(--muted); padding: 4px 0 8px; }
+#heatmap { display: grid; gap: 1px; font-family: Consolas, monospace; font-size: 10px; }
+#heatmap .hm-cell {
+  padding: 2px 4px;
+  text-align: right;
+  color: #cfd3dd;
+  white-space: nowrap;
+  overflow: hidden;
+}
+#heatmap .hm-head { color: var(--muted); text-align: right; padding: 2px 4px; }
+#heatmap .hm-strike { color: var(--muted); text-align: left; }
+#heatmap .hm-spot { outline: 1px solid #4dd0e1; }
 .flow-label { padding: 4px 8px; font-size: 11px; letter-spacing: 2px; color: var(--muted); }
 .hint { letter-spacing: 0; text-transform: none; opacity: 0.7; }
 #flow { flex: 1; min-height: 80px; }

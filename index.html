@@ -29,9 +29,17 @@
   <div id="toggles" class="toggles"></div>
 
   <main>
-    <div id="chart"></div>
-    <div class="flow-label">FLOW <span class="hint">(demo: signed candle volume — real signed options flow needs the feed, see README)</span></div>
-    <div id="flow"></div>
+    <div class="chart-row">
+      <div class="chart-col">
+        <div id="chart"></div>
+        <div class="flow-label">FLOW <span class="hint">(demo: signed candle volume — real signed options flow needs the feed, see README)</span></div>
+        <div id="flow"></div>
+      </div>
+      <aside id="sidecar" class="sidecar hidden">
+        <div class="sidecar-title">HEATMAP <span id="sidecar-time" class="hint"></span></div>
+        <div id="heatmap"></div>
+      </aside>
+    </div>
   </main>
 
   <footer><span id="meta">loading…</span></footer>

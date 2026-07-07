@@ -97,6 +97,44 @@ export function findGexZero(totals, spot) {
 }
 
 /**
+ * Per-strike "heaviness" — the Atlas orb field. For every strike that
+ * matters (top maxStrikes by peak |total GEX| across the session), emit one
+ * point per frame carrying its magnitude and sign, so the chart can draw an
+ * orb chain at that strike sized by node strength.
+ *
+ * @returns [{ strike, points: [{ time, strength, sign }] }]
+ */
+export function buildStrikeOrbs(frames, { maxStrikes = 14 } = {}) {
+  // Rank strikes by their session-peak magnitude.
+  const peak = new Map();
+  const perFrame = frames.map((frame) => {
+    const time = Math.floor(Date.parse(frame.capturedAt) / 1000);
+    const totals = new Map();
+    for (const row of frame.rows) {
+      const total = row.values.reduce((s, v) => s + parseValue(v.text), 0);
+      totals.set(row.strike, total);
+      const abs = Math.abs(total);
+      if (abs > (peak.get(row.strike) ?? 0)) peak.set(row.strike, abs);
+    }
+    return { time, totals };
+  });
+
+  const top = [...peak.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxStrikes)
+    .map(([strike]) => strike)
+    .sort((a, b) => a - b);
+
+  return top.map((strike) => ({
+    strike,
+    points: perFrame.map(({ time, totals }) => {
+      const total = totals.get(strike) ?? 0;
+      return { time, strength: Math.abs(total), sign: Math.sign(total) };
+    }),
+  }));
+}
+
+/**
  * Convert a day bundle (array of frames) into per-level time series,
  * ready to hand to the chart as stepped lines.
  * @returns {object} map of levelKey -> [{ time, value }]

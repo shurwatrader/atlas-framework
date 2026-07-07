@@ -2,7 +2,7 @@
  * app.js — glue. Load data via an adapter, derive levels, render, wire toggles.
  */
 import { sampleAdapter, listSeries } from './adapter.js';
-import { buildLevelSeries } from './levels.js';
+import { buildLevelSeries, buildStrikeOrbs, parseValue } from './levels.js';
 import { createAtlasChart } from './chart.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -10,10 +10,13 @@ const $ = (sel) => document.querySelector(sel);
 async function loadSeries(atlas, symbol) {
   const { bars, frames, derivedFrom, note } = await sampleAdapter(symbol);
   const { levels, netExposure } = buildLevelSeries(frames);
+  const lastTime = bars[bars.length - 1]?.t;
 
   atlas.setBars(bars);
-  atlas.setLevels(levels, bars[bars.length - 1]?.t);
+  atlas.setLevels(levels, lastTime);
+  atlas.setStrikeOrbs(buildStrikeOrbs(frames), lastTime);
   atlas.fit();
+  renderHeatmap(frames[frames.length - 1]);
 
   const last = bars[bars.length - 1];
   const first = frames[0];
@@ -57,6 +60,25 @@ async function main() {
     togglesEl.appendChild(chip);
   }
 
+  // Strike-orbs toggle (the per-strike heaviness field)
+  const orbChip = document.createElement('button');
+  orbChip.className = 'chip on';
+  orbChip.innerHTML = '<span class="dot" style="background:rgba(38,166,154,0.9)"></span>Strike Orbs';
+  orbChip.addEventListener('click', () =>
+    atlas.toggleStrikeOrbs(orbChip.classList.toggle('on'))
+  );
+  togglesEl.appendChild(orbChip);
+
+  // Heatmap sidecar toggle
+  const hmChip = document.createElement('button');
+  hmChip.className = 'chip';
+  hmChip.innerHTML = '<span class="dot" style="background:#7e57c2"></span>Heatmap';
+  hmChip.addEventListener('click', () => {
+    const on = hmChip.classList.toggle('on');
+    $('#sidecar').classList.toggle('hidden', !on);
+  });
+  togglesEl.appendChild(hmChip);
+
   // Timeframe tabs are cosmetic in the demo (one sample resolution).
   document.querySelectorAll('.tf').forEach((btn) =>
     btn.addEventListener('click', () => {
@@ -64,6 +86,58 @@ async function main() {
       btn.classList.add('active');
     })
   );
+}
+
+/**
+ * Latest-frame heatmap sidecar: strike × expiry grid of the most recent
+ * snapshot, diverging color scale (purple = negative GEX, teal→green =
+ * positive), sqrt-compressed, anchored to the frame's own min/max — the
+ * same scheme as gex-replay. Shows the ~40 heaviest strikes.
+ */
+function renderHeatmap(frame, maxRows = 40) {
+  const el = $('#heatmap');
+  if (!frame) { el.innerHTML = ''; return; }
+  const spot = parseFloat(frame.price);
+
+  const rows = frame.rows
+    .map((r) => ({ strike: r.strike, vals: r.values.map((v) => parseValue(v.text)) }))
+    .map((r) => ({ ...r, peak: Math.max(...r.vals.map(Math.abs)) }))
+    .sort((a, b) => b.peak - a.peak)
+    .slice(0, maxRows)
+    .sort((a, b) => b.strike - a.strike);
+
+  const maxAbs = Math.max(1, ...rows.map((r) => r.peak));
+  const color = (v) => {
+    const t = Math.sqrt(Math.abs(v) / maxAbs);
+    return v < 0 ? `rgba(126,87,194,${0.12 + 0.75 * t})` : `rgba(38,166,154,${0.10 + 0.75 * t})`;
+  };
+  const fmt = (v) => {
+    const a = Math.abs(v);
+    if (a >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+    if (a >= 1e6) return (v / 1e6).toFixed(0) + 'M';
+    if (a >= 1e3) return (v / 1e3).toFixed(0) + 'K';
+    return v ? v.toFixed(0) : '·';
+  };
+
+  el.style.gridTemplateColumns = `60px repeat(${frame.expiries.length}, 1fr)`;
+  const spotStrike = rows.reduce(
+    (best, r) => (Math.abs(r.strike - spot) < Math.abs(best - spot) ? r.strike : best),
+    rows[0]?.strike ?? 0
+  );
+
+  let html = '<div class="hm-head hm-strike">strike</div>' +
+    frame.expiries.map((e) => `<div class="hm-head">${e.slice(0, 5)}</div>`).join('');
+  for (const r of rows) {
+    html += `<div class="hm-cell hm-strike${r.strike === spotStrike ? ' hm-spot' : ''}">${r.strike}</div>`;
+    html += r.vals
+      .map((v) => `<div class="hm-cell" style="background:${color(v)}">${fmt(v)}</div>`)
+      .join('');
+  }
+  el.innerHTML = html;
+  $('#sidecar-time').textContent = new Date(frame.capturedAt).toLocaleString('en-US', {
+    timeZone: 'America/New_York', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  });
 }
 
 function fmtDollars(v) {
