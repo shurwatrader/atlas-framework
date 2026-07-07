@@ -45,18 +45,10 @@ python -m http.server 8000   # from the repo root
   *where money is moving* (change vs previous snapshot: building green /
   draining red — gex-replay's "Movers," drawn on the price chart). The two
   modes rank strikes independently, so Δ surfaces active strikes that net
-  totals hide
-
-The sample now spans **two trading days** (7/5 + a full 7/6 session — ~465
-snapshots per ticker at 2-min cadence, 8 PM ET overnight open through the
-next afternoon), so the orb field runs across the whole chart, Atlas-style.
-An orb column is drawn per captured snapshot — coverage is purely a function
-of how much history the feed provides.
-
-Full day bundles are ~128 MB raw (display strings + colors per cell), so
-[`scripts/slim_bundle.py`](scripts/slim_bundle.py) strips a day to numeric
-GEX per strike/expiry (values in $K, zero rows dropped) — 1.3–4.2 MB per
-ticker; the adapter expands slim files back to the standard frame shape.
+  totals hide. **Caveat:** with net-GEX snapshots, Δ shows net change per
+  interval — it cannot distinguish "new money in" from opposite positioning
+  offsetting it. True attribution needs the call/put flow split
+  (DATA_CONTRACT §4).
 - **Heatmap sidecar** — latest-frame strike × expiry board docked beside the
   chart (the ~40 heaviest strikes, gex-replay's diverging color scheme),
   toggled from the chip bar
@@ -68,6 +60,19 @@ ticker; the adapter expands slim files back to the standard frame shape.
 - **Level toggle chips** (like Atlas' GEX / VEX / Derived tabs)
 - **Flow pane** — placeholder signed volume histogram (see limitations)
 - Net exposure readout in the header
+
+The sample spans **two trading days** (7/5 + a full 7/6 session — ~465
+snapshots per ticker at 2-min cadence, 8 PM ET overnight open through the
+next afternoon), so the orb field runs across the whole chart, Atlas-style.
+An orb column is drawn per captured snapshot — coverage is purely a function
+of how much history the feed provides.
+
+Full day bundles are ~128 MB raw (display strings + colors per cell), so
+[`scripts/slim_bundle.py`](scripts/slim_bundle.py) strips a day to numeric
+GEX per strike/expiry (values in $K, zero rows dropped) — 1.3–4.2 MB per
+ticker; the adapter expands slim files back to the standard frame shape.
+This doubles as a sizing proof for DATA_CONTRACT §3: a full session of every
+strike, every 2 minutes, fits in a few MB.
 
 All level math lives in [`src/levels.js`](src/levels.js) — pure functions,
 testable headless in Node, same pattern as gex-replay's `scoring.js`.
@@ -102,16 +107,36 @@ a real Quantum feed means implementing **one function** (`quantumAdapter` in
 4. **It's the view competitors lead with.** SpotGamma, Volland, Heatseeker all
    sell level-on-price charts as the headline product.
 
+## How close is this to the real Atlas? (honest fidelity notes)
+
+The *concepts* match — levels on price, strength-sized orbs, min-clamp
+filtering, heatmap sidecar, replayable history. Three structural differences
+remain, beyond raw data availability:
+
+1. **Expiry aggregation.** Skylit's orbs are *organized by contract
+   expiration* ("the same strike can look different depending on the
+   expiration selected"). This demo sums GEX across visible expiries per
+   strike. The per-expiry values are already in the data — an expiration
+   selector is a build task, not a data ask.
+2. **Rendering.** Orbs here are Lightweight Charts series markers: sizes are
+   quantized, there's no glow/opacity blending, and each strike costs a
+   series (fine at ~20; a full production orb field would draw its own canvas
+   layer via the library's custom-series API).
+3. **Snapshot cadence = signal resolution.** Everything is as good as the
+   feed: 2-min scraped snapshots mean 2-min orbs. Atlas presumably renders
+   from a native tick/minute feed. Same code, better input, better output.
+
 ## What's still needed (data the demo fakes or lacks)
 
-| Gap | Demo today | What's needed from the terminal |
-|---|---|---|
-| **True signed options flow** | signed *candle volume* stands in | per-interval call/put volume, premium, aggressor side — the FLOW pane's real fuel |
-| **VEX levels** | GEX-OI only (that's what the scrape captured) | the same board for VEX (and GEX-Vol) — the terminal already computes them |
-| **Intraday level history** | 14 snapshots at 2-min cadence, one day | server-side snapshots (1-min or better) retained per trading day |
-| **True gamma flip** | GEX0 approximated over visible strikes | full-chain net gamma profile by spot price |
-| **Live updates** | static JSON | WebSocket push of new bars + level updates |
-| **OHLCV bars** | pulled from a broker API for the demo | terminal-native bars keep it one data source |
+| Gap | Demo today | What's needed from the terminal | Why it matters (use case) |
+|---|---|---|---|
+| **True signed options flow** | signed *candle volume* stands in | per-interval call/put volume, premium, aggressor side (DATA_CONTRACT §4) | the FLOW pane's real fuel — spot aggressive positioning before price reacts; makes Δ Flow attribution honest (in vs offsetting) |
+| **VEX / GEX-Vol levels** | GEX-OI only (that's what the scrape captured) | the same board for VEX and GEX-Vol — the terminal already computes them (§2) | vanna walls move with IV, not just spot — the GEX+VEX confluence view needs both; Vol-based GEX shows *today's* positioning vs stale OI |
+| **Intraday level history** | ~465 scraped snapshots across 2 days, 2-min cadence | server-side snapshots (1-min or better) retained per trading day (§3) | fills the orb field every session automatically; enables replay, backtests ("how often does the call wall reject?"), and alerts |
+| **True gamma flip** | GEX0 approximated over visible strikes | full-chain net gamma profile by spot price (§2) | the flip point is *the* regime line (positive gamma = mean-revert, negative = trend/accelerate); an approximation over 5 expiries can be off |
+| **Live updates** | static JSON | WebSocket push of new bars + level updates (§5) | turns a replay tool into a trading tool — levels move while you watch |
+| **OHLCV bars** | pulled from a broker API for the demo | terminal-native bars (§1) | one data source, one timestamp domain — no broker dependency or sync drift |
+| **Dark pool prints** | not shown | a prints/levels source (§6) | hidden institutional levels alongside dealer structure — confluence between a dark pool level and a wall is a high-conviction zone |
 
 ## Feature map vs. the real Atlas ([docs.skylit.ai/atlas](https://docs.skylit.ai/atlas/overview))
 
@@ -124,12 +149,12 @@ in one place." How this framework maps onto their published feature set:
 | **Orbs Classic** (strength = brightness) | ✅ lite version | level orbs + per-strike Strike Orbs field, sized by node strength, normalized per session |
 | **Orbs V2** (Min/Max Clamp size/opacity controls) | ✅ Min Clamp | strength filter dropdown (All / ≥25% / ≥50% / ≥75% of session max) hides weak nodes; Max Clamp + opacity = same one-line filter |
 | **Exposure views: GEX / VEX / GEX+VEX / Derived** | GEX-OI only | pure data availability — the toggle architecture is in place |
-| **Expiration selection** (per-expiry levels) | roadmap | scrape already carries per-expiry values; levels.js currently sums across expiries |
+| **Expiration selection** (per-expiry levels) | roadmap — see fidelity note 1 | scrape already carries per-expiry values; levels.js currently sums across expiries. Use case: 0DTE walls behave differently from monthly OI walls — a trader sizing an intraday play needs the near expiry isolated |
 | **Flowseeker pane** (options volume under price) | placeholder | needs real flow feed (DATA_CONTRACT §4) |
 | **Dark pool levels** | not started | needs a dark-pool prints source (DATA_CONTRACT §6) |
-| **Derived Orbs** (ES borrows SPY/SPXW, NQ borrows QQQ, adjusted for "the wiggle") | not started | cross-product mapping = a ratio/offset transform in the adapter layer |
-| **Scroll as Replay** (only data known at that time) | natural fit | levels are already time-stamped snapshots; gex-replay's scrubber UX plugs in |
-| **Projections (beta)** (forward price-gravity zones) | idea stage | gex-replay's migration scoring is a starting point |
+| **Derived Orbs** (ES borrows SPY/SPXW, NQ borrows QQQ, adjusted for "the wiggle") | price side demoed (SPX ← SPY bars) | level side = the same ratio transform in the adapter. Use case: futures traders get options structure their contract doesn't have |
+| **Scroll as Replay** (only data known at that time) | natural fit | levels are already time-stamped snapshots; gex-replay's scrubber UX plugs in. Use case: review a session without hindsight bias — what did the board know at 10:14? |
+| **Projections (beta)** (forward price-gravity zones) | idea stage | gex-replay's migration scoring is a starting point. Use case: forward-looking gravity zones instead of only current structure |
 | **Sidecars** (heatmap / Trinity cross-market) | ✅ heatmap sidecar | latest-frame strike × expiry board docked beside the chart; Trinity (cross-market) = same panel × 3 symbols |
 | **Chart layouts** (named, auto-saved, synced) | not started | localStorage first, account sync later |
 
@@ -170,7 +195,8 @@ docs/DATA_CONTRACT.md the endpoints/schemas the terminal would provide
   temporary path — see gex-replay's `docs/DATA_PIPELINE.md`). The terminal's
   own private API (`/api/v1/gex-all/...`) already returns richer data than the
   scrape; a sanctioned feed makes the scrape obsolete on day one.
-- Bars: MU 5m OHLCV, Jul 2–7 2026, all sessions.
+- Bars: MU/SPY/TSLA 5m OHLCV, Jul 2–7 2026, all sessions, via a broker API;
+  SPX derived from SPY × 10.03.
 - Charting: [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)
   (MIT) via CDN.
 
