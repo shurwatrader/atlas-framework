@@ -10,20 +10,29 @@ view already computes everything needed; Atlas is **the same data, rotated
 levels* over *time*, on top of price. That's the view traders actually trade
 from.
 
-**Demo runs today** on sample data captured from the terminal (via
-[gex-replay](https://github.com/shurwatrader/gex-replay)'s scrape) + real MU
-5-minute bars. No build tooling — static files, same philosophy as gex-replay.
+**Live demo:** https://shurwatrader.github.io/atlas-framework/
+
+Runs on sample data captured from the terminal (via
+[gex-replay](https://github.com/shurwatrader/gex-replay)'s scrape) + real
+5-minute bars for **MU, SPY, SPX, TSLA** (ticker dropdown, top left). No build
+tooling — static files, same philosophy as gex-replay. Locally:
 
 ```bash
 python -m http.server 8000   # from the repo root
 # open http://localhost:8000
 ```
 
+> SPX bars are **derived from SPY × 10.03** (no direct index bars in the demo
+> feed) — which doubles as a working example of Skylit's "Derived Orbs"
+> cross-product mapping, applied to price.
+
 ---
 
 ## What the demo shows
 
-- **Candlestick chart** (real MU 5m OHLCV, all sessions incl. overnight)
+- **Ticker switcher** — MU, SPY, SPX (derived), TSLA, each pairing real 5m
+  bars with that ticker's scraped GEX-OI board
+- **Candlestick chart** (real 5m OHLCV, all sessions incl. overnight)
 - **Orbs-lite** — each level draws a circle per snapshot, sized by node
   strength (Skylit's Orbs encode strength as brightness/size; same idea)
 - **Dealer levels as stepped dotted lines**, one point per GEX snapshot:

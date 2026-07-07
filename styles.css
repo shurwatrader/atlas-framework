@@ -41,6 +41,14 @@ header {
 }
 
 .ticker { display: flex; align-items: baseline; gap: 10px; font-family: Consolas, monospace; }
+#ticker {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-family: inherit;
+}
 #symbol { font-weight: 700; }
 .price { color: var(--accent); }
 .net { color: var(--muted); font-size: 12px; }

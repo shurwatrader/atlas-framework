@@ -13,14 +13,24 @@
  *   { bars: [{t,o,h,l,c,v}], frames: [rawGexFrame, ...] }
  */
 
-export async function sampleAdapter() {
-  const [barsRes, gexRes] = await Promise.all([
-    fetch('data/sample/MU_bars_5m.json'),
-    fetch('data/sample/MU_GEXOI_2026-07-05.json'),
-  ]);
+export async function listSeries() {
+  const res = await fetch('data/sample/manifest.json');
+  return (await res.json()).series;
+}
+
+export async function sampleAdapter(symbol = 'MU') {
+  const series = (await listSeries()).find((s) => s.symbol === symbol);
+  if (!series) throw new Error(`No sample series for ${symbol}`);
+  const [barsRes, gexRes] = await Promise.all([fetch(series.bars), fetch(series.gex)]);
   const barsFile = await barsRes.json();
   const gexFile = await gexRes.json();
-  return { symbol: barsFile.symbol, bars: barsFile.bars, frames: gexFile.frames };
+  return {
+    symbol: barsFile.symbol,
+    bars: barsFile.bars,
+    frames: gexFile.frames,
+    derivedFrom: barsFile.derivedFrom ?? null,
+    note: series.note ?? null,
+  };
 }
 
 /**
