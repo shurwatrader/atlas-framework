@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "atlas",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "8231", "--directory", "C:/Users/jalee/Downloads/atlas-framework"],
+      "port": 8231
+    }
+  ]
+}

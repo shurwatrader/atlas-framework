@@ -1,0 +1,88 @@
+:root {
+  --bg: #0b0e14;
+  --panel: #10141d;
+  --text: #d1d4dc;
+  --muted: #8b93a7;
+  --accent: #4db6ac;
+  --border: rgba(139, 147, 167, 0.15);
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+}
+
+body { display: flex; flex-direction: column; }
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.brand { letter-spacing: 2px; font-size: 12px; color: var(--muted); }
+.brand strong { color: var(--text); }
+.tag {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--accent);
+}
+
+.ticker { display: flex; align-items: baseline; gap: 10px; font-family: Consolas, monospace; }
+#symbol { font-weight: 700; }
+.price { color: var(--accent); }
+.net { color: var(--muted); font-size: 12px; }
+
+.timeframes { margin-left: auto; display: flex; gap: 4px; }
+.tf {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.tf.active, .tf:hover { color: var(--text); border-color: var(--border); background: rgba(139,147,167,0.08); }
+
+.toggles { display: flex; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 3px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0.45;
+}
+.chip.on { opacity: 1; color: var(--text); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0 8px; }
+#chart { flex: 3; min-height: 0; }
+.flow-label { padding: 4px 8px; font-size: 11px; letter-spacing: 2px; color: var(--muted); }
+.hint { letter-spacing: 0; text-transform: none; opacity: 0.7; }
+#flow { flex: 1; min-height: 80px; }
+
+footer {
+  padding: 6px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}

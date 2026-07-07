@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Atlas — GEX/VEX levels on price</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <header>
+    <div class="brand">QUANTUM · <strong>ATLAS</strong> <span class="tag">framework demo</span></div>
+    <div class="ticker">
+      <span id="symbol">—</span>
+      <span id="price" class="price">—</span>
+      <span id="net" class="net"></span>
+    </div>
+    <nav class="timeframes">
+      <button class="tf">1m</button>
+      <button class="tf active">5m</button>
+      <button class="tf">15m</button>
+      <button class="tf">1H</button>
+      <button class="tf">4H</button>
+      <button class="tf">1D</button>
+    </nav>
+  </header>
+
+  <div id="toggles" class="toggles"></div>
+
+  <main>
+    <div id="chart"></div>
+    <div class="flow-label">FLOW <span class="hint">(demo: signed candle volume — real signed options flow needs the feed, see README)</span></div>
+    <div id="flow"></div>
+  </main>
+
+  <footer><span id="meta">loading…</span></footer>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
