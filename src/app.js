@@ -36,8 +36,10 @@ async function loadSeries(atlas, symbol) {
   $('#price').textContent = last ? last.c.toFixed(2) : '—';
   const lastNet = netExposure[netExposure.length - 1];
   $('#net').textContent = lastNet ? `Net GEX ${fmtDollars(lastNet.value)}` : '';
+  const firstDay = first?.tradingDay ?? '';
+  const lastDay = frames[frames.length - 1]?.tradingDay ?? '';
   $('#meta').textContent =
-    `${frames.length} snapshots · ${first?.tradingDay ?? ''} · sample data` +
+    `${frames.length} snapshots · ${firstDay}${lastDay && lastDay !== firstDay ? ' → ' + lastDay : ''} · sample data` +
     (note ? ` · ${note}` : '');
 }
 

@@ -44,10 +44,16 @@ python -m http.server 8000   # from the repo root
   modes rank strikes independently, so Δ surfaces active strikes that net
   totals hide
 
-> **Why the orbs sit in one spot in this demo:** an orb column is drawn per
-> captured snapshot, and the sample day only has 14 frames (~28 min of 2-min
-> captures). Run the capture all session — or feed it stored history — and the
-> field fills the whole chart, Atlas-style, with no code changes.
+The sample now spans **two trading days** (7/5 + a full 7/6 session — ~465
+snapshots per ticker at 2-min cadence, 8 PM ET overnight open through the
+next afternoon), so the orb field runs across the whole chart, Atlas-style.
+An orb column is drawn per captured snapshot — coverage is purely a function
+of how much history the feed provides.
+
+Full day bundles are ~128 MB raw (display strings + colors per cell), so
+[`scripts/slim_bundle.py`](scripts/slim_bundle.py) strips a day to numeric
+GEX per strike/expiry (values in $K, zero rows dropped) — 1.3–4.2 MB per
+ticker; the adapter expands slim files back to the standard frame shape.
 - **Heatmap sidecar** — latest-frame strike × expiry board docked beside the
   chart (the ~40 heaviest strikes, gex-replay's diverging color scheme),
   toggled from the chip bar
@@ -150,7 +156,8 @@ src/levels.js         pure level math (walls, kings, GEX0, net) — the core
 src/adapter.js        data adapters: sample JSON now, Quantum API later
 src/chart.js          Lightweight Charts wrapper: candles, level lines, flow
 src/app.js            glue
-data/sample/          one day of MU GEX-OI snapshots + real MU 5m bars
+data/sample/          two days of GEX-OI snapshots + real 5m bars per ticker
+scripts/slim_bundle.py  compresses a gex-replay day bundle to the slim format
 docs/DATA_CONTRACT.md the endpoints/schemas the terminal would provide
 ```
 
