@@ -8,13 +8,14 @@ import { createAtlasChart } from './chart.js';
 const $ = (sel) => document.querySelector(sel);
 
 // Current series state, so orb mode can re-render without refetching.
-const state = { frames: [], lastTime: null, orbMode: 'net' };
+const state = { frames: [], lastTime: null, orbMode: 'net', orbMin: 0.25 };
 
 function renderOrbs(atlas) {
   atlas.setStrikeOrbs(
     buildStrikeOrbs(state.frames, { mode: state.orbMode }),
     state.lastTime,
-    state.orbMode
+    state.orbMode,
+    state.orbMin
   );
 }
 
@@ -82,6 +83,24 @@ async function main() {
     atlas.toggleStrikeOrbs(orbChip.classList.toggle('on'))
   );
   togglesEl.appendChild(orbChip);
+
+  // Orb strength filter — the Orbs V2 "Min Clamp": hide nodes weaker than
+  // this fraction of the session's strongest node.
+  const minSel = document.createElement('select');
+  minSel.id = 'orbmin';
+  minSel.title = 'Minimum orb strength (fraction of the session’s strongest node)';
+  for (const [label, frac] of [['All orbs', 0], ['Strong ≥25%', 0.25], ['Heavy ≥50%', 0.5], ['Strongest ≥75%', 0.75]]) {
+    const opt = document.createElement('option');
+    opt.value = frac;
+    opt.textContent = label;
+    if (frac === state.orbMin) opt.selected = true;
+    minSel.appendChild(opt);
+  }
+  minSel.addEventListener('change', () => {
+    state.orbMin = parseFloat(minSel.value);
+    renderOrbs(atlas);
+  });
+  togglesEl.appendChild(minSel);
 
   // Orb mode: Net (where structure sits) vs Δ Flow (money in/out per interval)
   const deltaChip = document.createElement('button');

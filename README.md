@@ -38,6 +38,9 @@ python -m http.server 8000   # from the repo root
 - **Strike Orbs** — per-strike heaviness field: the session's heaviest strikes
   each get an orb chain across time, sized by |total GEX| and colored by sign
   (teal positive / purple negative) — toggleable like any level
+- **Orb strength filter** — a Min-Clamp dropdown (default **Strong ≥25%**)
+  hides orbs weaker than that fraction of the session's strongest node, so
+  the field shows conviction instead of clutter
 - **Δ Flow mode** — flips the orb field from *where structure sits* (net) to
   *where money is moving* (change vs previous snapshot: building green /
   draining red — gex-replay's "Movers," drawn on the price chart). The two
@@ -119,7 +122,7 @@ in one place." How this framework maps onto their published feature set:
 | Skylit Atlas feature | Status here | Notes |
 |---|---|---|
 | **Orbs Classic** (strength = brightness) | ✅ lite version | level orbs + per-strike Strike Orbs field, sized by node strength, normalized per session |
-| **Orbs V2** (Min/Max Clamp size/opacity controls) | roadmap | needs a settings panel; sizing math already in `chart.js` |
+| **Orbs V2** (Min/Max Clamp size/opacity controls) | ✅ Min Clamp | strength filter dropdown (All / ≥25% / ≥50% / ≥75% of session max) hides weak nodes; Max Clamp + opacity = same one-line filter |
 | **Exposure views: GEX / VEX / GEX+VEX / Derived** | GEX-OI only | pure data availability — the toggle architecture is in place |
 | **Expiration selection** (per-expiry levels) | roadmap | scrape already carries per-expiry values; levels.js currently sums across expiries |
 | **Flowseeker pane** (options volume under price) | placeholder | needs real flow feed (DATA_CONTRACT §4) |

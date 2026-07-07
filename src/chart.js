@@ -123,7 +123,9 @@ export function createAtlasChart(container, flowContainer) {
      *   net   — teal positive GEX / purple negative (gex-replay's scheme)
      *   delta — green building / red draining (money in vs out per interval)
      */
-    setStrikeOrbs(orbs, extendToTime, mode = 'net') {
+    /** minFrac: orbs weaker than minFrac × session max are not drawn
+     *  (the Orbs V2 "Min Clamp" idea — declutter to the nodes that matter). */
+    setStrikeOrbs(orbs, extendToTime, mode = 'net', minFrac = 0) {
       const palette = mode === 'delta'
         ? { pos: 'rgba(102,187,106,0.85)', neg: 'rgba(239,83,80,0.85)' }
         : { pos: 'rgba(38,166,154,0.75)', neg: 'rgba(149,117,205,0.8)' };
@@ -144,7 +146,7 @@ export function createAtlasChart(container, flowContainer) {
         series.setData(data);
         series.setMarkers(
           points
-            .filter((p) => p.strength > 0)
+            .filter((p) => p.strength > 0 && p.strength >= minFrac * maxStrength)
             .map((p) => ({
               time: p.time,
               position: 'inBar',
