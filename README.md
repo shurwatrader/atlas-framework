@@ -68,11 +68,15 @@ Concretely, "built on top of" means:
 - **Replay transport** — scrub/play the session and watch price, levels, orbs
   and the heatmap advance together, frame by frame
 - **Strike Orbs** — the heatmap's pressure field drawn on price: the
-  session's heaviest strikes each get an orb chain across time, with
-  **opacity + size scaling with |total GEX|** — the same values and hues that
-  color the board's cells (teal positive / purple negative), so an orb chain
-  and its board row read as one thing. Skylit's Orbs encode strength as
-  brightness/size; same idea. Toggleable like any level.
+  heaviest strikes **within the session's traded range (±5%)** each get an
+  orb chain across time, with **opacity + size scaling with |total GEX|** —
+  the same values and hues that color the board's cells (teal positive /
+  purple negative), so an orb chain and its board row read as one thing.
+  Far-OTM OI magnets stay off the chart (they're on the board, and the wall
+  lines still point at them); candles alone drive the price axis, so the
+  view hugs price action instead of zooming out to fit distant strikes.
+  Skylit's Orbs encode strength as brightness/size; same idea. Toggleable
+  like any level.
 - **Orb strength filter** — a Min-Clamp dropdown (default **Strong ≥25%**)
   hides orbs weaker than that fraction of the session's strongest node, so
   the field shows conviction instead of clutter

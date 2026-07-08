@@ -108,11 +108,15 @@ export function findGexZero(totals, spot) {
  *             (building = +, draining = −). First frame has no delta.
  *
  * Strikes are ranked by session-peak strength in the chosen mode, top
- * maxStrikes kept.
+ * maxStrikes kept. Pass range = {min, max} (the session's traded price
+ * range, padded) to keep the field on strikes price can actually interact
+ * with — without it the budget goes to far-OTM round strikes (600 / 1200 /
+ * 2500 style OI magnets) that sit nowhere near a candle. Far structure
+ * still shows via the level lines and the heatmap board.
  *
  * @returns [{ strike, points: [{ time, strength, sign }] }]
  */
-export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net' } = {}) {
+export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range = null } = {}) {
   const perFrame = frames.map((frame) => {
     const time = Math.floor(Date.parse(frame.capturedAt) / 1000);
     const totals = new Map();
@@ -126,6 +130,7 @@ export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net' } = {}) 
   const strikes = new Set(perFrame.flatMap((f) => [...f.totals.keys()]));
   const built = new Map();
   for (const strike of strikes) {
+    if (range && (strike < range.min || strike > range.max)) continue;
     const points = [];
     for (let i = 0; i < perFrame.length; i++) {
       const { time, totals } = perFrame[i];

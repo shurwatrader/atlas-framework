@@ -26,7 +26,7 @@ const atLive = () => state.frameIndex >= state.frames.length - 1;
 
 function renderOrbs(atlas) {
   atlas.setStrikeOrbs(
-    buildStrikeOrbs(state.frames, { mode: state.orbMode }),
+    buildStrikeOrbs(state.frames, { mode: state.orbMode, range: state.orbRange }),
     state.lastTime,
     state.orbMode,
     state.orbMin
@@ -107,6 +107,12 @@ async function loadSeries(atlas, symbol) {
   const { levels } = buildLevelSeries(frames);
   Object.assign(state, { frames, symbol, derivedFrom, note });
   state.lastTime = bars[bars.length - 1]?.t;
+
+  // Orb field only covers strikes near where price actually traded (±5%);
+  // far-OTM OI magnets stay off the chart (they're on the board + levels).
+  let lo = Infinity, hi = -Infinity;
+  for (const b of bars) { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; }
+  state.orbRange = bars.length ? { min: lo * 0.95, max: hi * 1.05 } : null;
 
   atlas.setBars(bars);
   atlas.setLevels(levels, state.lastTime);

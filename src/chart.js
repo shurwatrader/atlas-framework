@@ -59,6 +59,10 @@ export function createAtlasChart(container, flowContainer) {
       priceLineVisible: false,
       title: style.title,
       lineType: 1, // stepped — a level holds until the next snapshot
+      // Candles drive the viewport; a wall at a far strike shouldn't zoom
+      // the chart out until price is a sliver. Off-window levels appear as
+      // you zoom/pan (and are always on the heatmap board).
+      autoscaleInfoProvider: () => null,
     });
   }
 
@@ -143,6 +147,7 @@ export function createAtlasChart(container, flowContainer) {
         lastValueVisible: false,
         priceLineVisible: false,
         crosshairMarkerVisible: false,
+        autoscaleInfoProvider: () => null, // never stretch the price axis
       }));
     }
     while (orbSeries.length > cache.orbs.length) chart.removeSeries(orbSeries.pop());
