@@ -2,12 +2,20 @@
  * chart.js — all rendering. Wraps TradingView Lightweight Charts (CDN, MIT).
  *
  * Layout mirrors Atlas:
- *   main pane  — candlesticks + GEX/VEX levels rendered as dotted step lines
- *                with "orbs" (circle markers sized by node strength — a lite
- *                version of Skylit's Orbs Classic, where brightness/size
- *                encodes node strength)
+ *   main pane  — candlesticks
+ *                + dealer levels as dotted step-line INDICATORS (no markers:
+ *                  a wall/king just re-positions every snapshot)
+ *                + the strike orb field: the heatmap's per-strike pressure
+ *                  drawn on price, opacity/size scaling with |GEX| — a lite
+ *                  version of Skylit's Orbs Classic, where brightness/size
+ *                  encodes node strength
  *   flow pane  — histogram (demo: signed candle volume; production: real
  *                signed options flow — see README "What's still needed")
+ *
+ * Replay: the wrapper caches the full session (bars, levels, orbs) and
+ * setReplayTime(t) re-renders everything truncated to time <= t — the chart
+ * only ever shows what was known at the playhead (gex-replay's replay idea,
+ * Skylit's "Scroll as Replay"). t = null means live view (no truncation).
  */
 
 const LEVEL_STYLES = {
@@ -59,6 +67,18 @@ export function createAtlasChart(container, flowContainer) {
   // Per-strike orb field: one invisible line series per heavy strike, whose
   // markers are the orbs (size = node strength, color = GEX sign).
   let orbSeries = [];
+  let orbsVisible = true;
+
+  // Full-session cache — the replay playhead re-slices from here.
+  const cache = {
+    bars: [],
+    levels: {},          // key -> [{time, value, strength}]
+    orbs: [],            // [{strike, points}]
+    orbMode: 'net',
+    orbMinFrac: 0,
+    endTime: null,       // right edge levels/orbs extend to in live view
+    truncTime: null,     // replay playhead (null = live view)
+  };
 
   // Keep both panes' time axes locked together.
   chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
@@ -68,99 +88,137 @@ export function createAtlasChart(container, flowContainer) {
     if (r) chart.timeScale().setVisibleLogicalRange(r);
   });
 
+  const upTo = (points, t) =>
+    t == null ? points : points.filter((p) => p.time <= t);
+
+  function renderBars() {
+    const t = cache.truncTime;
+    const bars = t == null ? cache.bars : cache.bars.filter((b) => b.t <= t);
+    candles.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })));
+    // Demo flow: signed volume (up bar = +v, down bar = -v). Production
+    // replaces this with true signed options flow per DATA_CONTRACT.md.
+    flow.setData(bars.map((b) => ({
+      time: b.t,
+      value: b.c >= b.o ? b.v : -b.v,
+      color: b.c >= b.o ? 'rgba(120,144,220,0.85)' : 'rgba(139,147,167,0.6)',
+    })));
+  }
+
+  function renderLevels() {
+    // Levels are pure indicators: a stepped dotted line that re-positions
+    // every snapshot — no markers. Strength/pressure lives in the orb field.
+    const edge = cache.truncTime ?? cache.endTime;
+    for (const [key, series] of Object.entries(levelSeries)) {
+      const points = upTo(cache.levels[key] ?? [], cache.truncTime);
+      const data = points.map(({ time, value }) => ({ time, value }));
+      // Extend the last known level to the playhead (replay) or the right
+      // edge (live), so it reads as an active level.
+      if (data.length && edge && edge > data[data.length - 1].time) {
+        data.push({ time: edge, value: data[data.length - 1].value });
+      }
+      series.setData(data);
+    }
+  }
+
+  /**
+   * Strike heaviness — the Atlas orb field: the heatmap's per-strike values
+   * drawn on the price chart. Strength maps to OPACITY (and a little size),
+   * sqrt-compressed against the session max — the same encoding the heatmap
+   * sidecar uses for its cells, so an orb chain and its board row read as one
+   * thing. Palette by mode:
+   *   net   — teal positive GEX / purple negative (the heatmap's exact hues)
+   *   delta — green building / red draining (money in vs out per interval)
+   * minFrac: orbs weaker than minFrac × session max are not drawn
+   * (the Orbs V2 "Min Clamp" idea — declutter to the nodes that matter).
+   */
+  function renderOrbField() {
+    const palette = cache.orbMode === 'delta'
+      ? { pos: '102,187,106', neg: '239,83,80' }
+      : { pos: '38,166,154', neg: '126,87,194' }; // heatmap cell hues
+    // One series per heavy strike, recreated only when the orb set changes;
+    // replay ticks reuse them (see setReplayTime).
+    while (orbSeries.length < cache.orbs.length) {
+      orbSeries.push(chart.addLineSeries({
+        color: 'rgba(0,0,0,0)', // orbs only — no connecting line
+        lastValueVisible: false,
+        priceLineVisible: false,
+        crosshairMarkerVisible: false,
+      }));
+    }
+    while (orbSeries.length > cache.orbs.length) chart.removeSeries(orbSeries.pop());
+
+    const maxStrength = Math.max(1, ...cache.orbs.flatMap((o) => o.points.map((p) => p.strength)));
+    const edge = cache.truncTime ?? cache.endTime;
+    cache.orbs.forEach(({ strike, points }, i) => {
+      const visible = upTo(points, cache.truncTime);
+      const series = orbSeries[i];
+      series.applyOptions({ visible: orbsVisible });
+      const data = visible.map(({ time }) => ({ time, value: strike }));
+      if (data.length && edge && edge > data[data.length - 1].time) {
+        data.push({ time: edge, value: strike });
+      }
+      series.setData(data);
+      series.setMarkers(
+        visible
+          .filter((p) => p.strength > 0 && p.strength >= cache.orbMinFrac * maxStrength)
+          .map((p) => {
+            const t = Math.sqrt(p.strength / maxStrength);
+            return {
+              time: p.time,
+              position: 'inBar',
+              shape: 'circle',
+              color: `rgba(${p.sign >= 0 ? palette.pos : palette.neg},${(0.10 + 0.85 * t).toFixed(3)})`,
+              size: 0.3 + 1.2 * t,
+            };
+          })
+      );
+    });
+  }
+
   return {
     setBars(bars) {
-      candles.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })));
-      // Demo flow: signed volume (up bar = +v, down bar = -v). Production
-      // replaces this with true signed options flow per DATA_CONTRACT.md.
-      flow.setData(bars.map((b) => ({
-        time: b.t,
-        value: b.c >= b.o ? b.v : -b.v,
-        color: b.c >= b.o ? 'rgba(120,144,220,0.85)' : 'rgba(139,147,167,0.6)',
-      })));
+      cache.bars = bars;
+      renderBars();
     },
 
     /** levels: map key -> [{time, value, strength}] from levels.buildLevelSeries */
     setLevels(levels, extendToTime) {
-      // Normalize orb size against the strongest node across all levels,
-      // so relative strength is comparable between walls/kings.
-      const maxStrength = Math.max(
-        1,
-        ...Object.values(levels).flatMap((pts) => pts.map((p) => p.strength ?? 0))
-      );
-      for (const [key, points] of Object.entries(levels)) {
-        if (!levelSeries[key]) continue;
-        const data = points.map(({ time, value }) => ({ time, value }));
-        // Extend the last known level to the right edge so it reads as an
-        // active level, like Atlas' orb chains running ahead of price.
-        if (data.length && extendToTime && extendToTime > data[data.length - 1].time) {
-          data.push({ time: extendToTime, value: data[data.length - 1].value });
-        }
-        levelSeries[key].setData(data);
-        // Orbs-lite: one circle per snapshot, sized by node strength.
-        levelSeries[key].setMarkers(
-          points
-            .filter((p) => (p.strength ?? 0) > 0)
-            .map((p) => ({
-              time: p.time,
-              position: 'inBar',
-              shape: 'circle',
-              color: LEVEL_STYLES[key].color,
-              size: 0.4 + 1.6 * Math.sqrt(p.strength / maxStrength),
-            }))
-        );
-      }
+      cache.levels = levels;
+      cache.endTime = extendToTime ?? cache.endTime;
+      renderLevels();
     },
 
     toggleLevel(key, visible) {
       levelSeries[key]?.applyOptions({ visible });
     },
 
-    /**
-     * Strike heaviness — the Atlas orb field.
-     * orbs: [{ strike, points: [{time, strength, sign}] }] from buildStrikeOrbs.
-     * Orb size scales with sqrt(strength / session max). Palette by mode:
-     *   net   — teal positive GEX / purple negative (gex-replay's scheme)
-     *   delta — green building / red draining (money in vs out per interval)
-     */
-    /** minFrac: orbs weaker than minFrac × session max are not drawn
-     *  (the Orbs V2 "Min Clamp" idea — declutter to the nodes that matter). */
+    /** orbs: [{ strike, points: [{time, strength, sign}] }] from buildStrikeOrbs. */
     setStrikeOrbs(orbs, extendToTime, mode = 'net', minFrac = 0) {
-      const palette = mode === 'delta'
-        ? { pos: 'rgba(102,187,106,0.85)', neg: 'rgba(239,83,80,0.85)' }
-        : { pos: 'rgba(38,166,154,0.75)', neg: 'rgba(149,117,205,0.8)' };
-      for (const s of orbSeries) chart.removeSeries(s);
-      orbSeries = [];
-      const maxStrength = Math.max(1, ...orbs.flatMap((o) => o.points.map((p) => p.strength)));
-      for (const { strike, points } of orbs) {
-        const series = chart.addLineSeries({
-          color: 'rgba(0,0,0,0)', // orbs only — no connecting line
-          lastValueVisible: false,
-          priceLineVisible: false,
-          crosshairMarkerVisible: false,
-        });
-        const data = points.map(({ time }) => ({ time, value: strike }));
-        if (data.length && extendToTime && extendToTime > data[data.length - 1].time) {
-          data.push({ time: extendToTime, value: strike });
-        }
-        series.setData(data);
-        series.setMarkers(
-          points
-            .filter((p) => p.strength > 0 && p.strength >= minFrac * maxStrength)
-            .map((p) => ({
-              time: p.time,
-              position: 'inBar',
-              shape: 'circle',
-              color: p.sign >= 0 ? palette.pos : palette.neg,
-              size: 0.15 + 1.85 * Math.sqrt(p.strength / maxStrength),
-            }))
-        );
-        orbSeries.push(series);
-      }
+      cache.orbs = orbs;
+      cache.endTime = extendToTime ?? cache.endTime;
+      cache.orbMode = mode;
+      cache.orbMinFrac = minFrac;
+      renderOrbField();
     },
 
     toggleStrikeOrbs(visible) {
+      orbsVisible = visible;
       for (const s of orbSeries) s.applyOptions({ visible });
+    },
+
+    /**
+     * Move the replay playhead: everything re-renders truncated to time <= t.
+     * Pass null to return to the live (full-session) view. The visible time
+     * window is preserved so scrubbing doesn't yank the viewport around.
+     */
+    setReplayTime(t) {
+      if (cache.truncTime === t) return;
+      cache.truncTime = t;
+      const view = chart.timeScale().getVisibleRange();
+      renderBars();
+      renderLevels();
+      renderOrbField();
+      if (view) chart.timeScale().setVisibleRange(view);
     },
 
     fit() { chart.timeScale().fitContent(); },

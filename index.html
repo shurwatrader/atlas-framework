@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Atlas — GEX/VEX levels on price</title>
+  <title>Atlas — GEX Replay on price</title>
   <link rel="stylesheet" href="styles.css" />
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
   <header>
-    <div class="brand">QUANTUM · <strong>ATLAS</strong> <span class="tag">framework demo</span></div>
+    <div class="brand">QUANTUM · <strong>ATLAS</strong> <span class="tag">gex-replay + price</span></div>
     <div class="ticker">
       <select id="ticker" title="Ticker"></select>
       <span id="symbol">—</span>
@@ -24,6 +24,16 @@
       <button class="tf">4H</button>
       <button class="tf">1D</button>
     </nav>
+    <div class="topmeta">
+      <div class="meta-block">
+        <span class="meta-label">Trading Day</span>
+        <span id="tradingDay" class="meta-val td">—</span>
+      </div>
+      <div class="meta-block">
+        <span class="meta-label">Snapshot (ET)</span>
+        <span id="snapET" class="meta-val">—</span>
+      </div>
+    </div>
   </header>
 
   <div id="toggles" class="toggles"></div>
@@ -35,14 +45,46 @@
         <div class="flow-label">FLOW <span class="hint">(demo: signed candle volume — real signed options flow needs the feed, see README)</span></div>
         <div id="flow"></div>
       </div>
-      <aside id="sidecar" class="sidecar hidden">
+      <aside id="sidecar" class="sidecar">
         <div class="sidecar-title">HEATMAP <span id="sidecar-time" class="hint"></span></div>
         <div id="heatmap"></div>
       </aside>
     </div>
   </main>
 
-  <footer><span id="meta">loading…</span></footer>
+  <!-- replay transport — same controls and shortcuts as gex-replay-basic -->
+  <footer class="controls">
+    <div class="ctl-buttons">
+      <button id="firstBtn" title="First frame (Home)">⏮</button>
+      <button id="prevBtn" title="Previous frame (←)">◀</button>
+      <button id="playBtn" class="play" title="Play / Pause (Space)">▶</button>
+      <button id="nextBtn" title="Next frame (→)">▶</button>
+      <button id="lastBtn" title="Last frame (End)">⏭</button>
+    </div>
+    <div class="ctl-timeline">
+      <input id="scrubber" class="scrubber" type="range" min="0" max="0" value="0" step="1" />
+      <span id="frameLabel" class="frame-label">— / —</span>
+    </div>
+    <div class="ctl-right">
+      <label class="speed">Step
+        <select id="stepSelect">
+          <option value="1" selected>2m</option>
+          <option value="5">10m</option>
+          <option value="15">30m</option>
+          <option value="30">1h</option>
+        </select>
+      </label>
+      <label class="speed">Speed
+        <select id="speedSelect">
+          <option value="0.5" selected>0.5×</option>
+          <option value="1">1×</option>
+          <option value="2">2×</option>
+        </select>
+      </label>
+    </div>
+  </footer>
+
+  <footer class="statusbar"><span id="meta">loading…</span></footer>
 
   <script type="module" src="src/app.js"></script>
 </body>

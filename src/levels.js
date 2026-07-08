@@ -1,11 +1,11 @@
 /**
  * levels.js — turn a raw GEX matrix frame into chart-ready levels.
  *
- * A "frame" is one snapshot of the strike × expiry GEX board
- * (see data/sample/MU_GEXOI_2026-07-05.json for the shape).
+ * A "frame" is one snapshot of the strike × expiry GEX board — the exact
+ * frame shape gex-replay-basic publishes in its data/<slug>/<date>.json.gz
+ * bundles (see that repo's docs/DATA_PIPELINE.md for the schema).
  * Everything here is pure functions — no DOM, no fetch — so the same
- * module can be unit-tested headless in Node, exactly like
- * gex-replay's scoring.js.
+ * module can be unit-tested headless in Node.
  *
  * Exposed levels per frame:
  *   callWall  — strike with the largest positive total GEX (dealer supply)

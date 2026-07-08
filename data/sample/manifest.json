@@ -1,8 +1,0 @@
-{
-  "series": [
-    { "symbol": "MU",   "bars": "data/sample/MU_bars_5m.json",   "gex": ["data/sample/MU_GEXOI_2026-07-05.json", "data/sample/MU_GEXOI_2026-07-06.slim.json"] },
-    { "symbol": "SPY",  "bars": "data/sample/SPY_bars_5m.json",  "gex": ["data/sample/SPY_GEXOI_2026-07-05.json", "data/sample/SPY_GEXOI_2026-07-06.slim.json"] },
-    { "symbol": "SPX",  "bars": "data/sample/SPX_bars_5m.json",  "gex": ["data/sample/SPX_GEXOI_2026-07-05.json", "data/sample/SPX_GEXOI_2026-07-06.slim.json"], "note": "bars derived from SPY × 10.03 — the Derived Orbs concept applied to price" },
-    { "symbol": "TSLA", "bars": "data/sample/TSLA_bars_5m.json", "gex": ["data/sample/TSLA_GEXOI_2026-07-05.json", "data/sample/TSLA_GEXOI_2026-07-06.slim.json"] }
-  ]
-}

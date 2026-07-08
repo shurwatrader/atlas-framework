@@ -118,9 +118,85 @@ main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0
 .hint { letter-spacing: 0; text-transform: none; opacity: 0.7; }
 #flow { flex: 1; min-height: 80px; }
 
-footer {
-  padding: 6px 16px;
+/* Trading Day + Snapshot (ET) — same dual timestamp as gex-replay-basic,
+   so overnight frames are never ambiguous */
+.topmeta { display: flex; align-items: stretch; gap: 22px; margin-left: 16px; }
+.meta-block { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; }
+.meta-label { font-size: 9px; color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.7; }
+.meta-val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; font-family: Consolas, monospace; }
+.meta-val.td { color: var(--accent); }
+
+/* ---------- replay transport (ported from gex-replay-basic) ---------- */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.ctl-buttons { display: flex; gap: 6px; }
+.controls button {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  width: 34px;
+  height: 28px;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.controls button:hover { border-color: var(--accent); }
+.controls button.play { width: 44px; background: var(--accent); color: #04121a; border-color: var(--accent); font-weight: 700; }
+.controls button.play.playing { background: var(--bg); color: var(--text); }
+
+/* scrubber + frame counter kept together so "3 / 465" reads as timeline pos */
+.ctl-timeline { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 200px; }
+.scrubber { flex: 1; min-width: 120px; accent-color: var(--accent); height: 6px; }
+.frame-label {
+  font-size: 12px;
+  color: var(--text);
+  min-width: 64px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: Consolas, monospace;
+  white-space: nowrap;
+}
+.ctl-right { display: flex; align-items: center; gap: 18px; }
+.speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.speed select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.statusbar {
+  padding: 5px 16px;
   border-top: 1px solid var(--border);
   color: var(--muted);
   font-size: 12px;
+}
+.statusbar a { color: var(--accent); text-decoration: none; }
+.statusbar a:hover { text-decoration: underline; }
+
+@media (max-width: 720px) {
+  .topmeta { margin-left: 0; }
+  .ctl-timeline { flex: 1 1 100%; order: 3; }
+  .ctl-buttons { order: 1; }
+  .ctl-right { order: 2; flex: 1; justify-content: flex-end; }
 }

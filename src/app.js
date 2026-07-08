@@ -1,14 +1,28 @@
 /**
- * app.js — glue. Load data via an adapter, derive levels, render, wire toggles.
+ * app.js — glue. Load data via an adapter, derive levels, render, wire the
+ * replay transport (ported from gex-replay-basic: same controls, same keys).
  */
-import { sampleAdapter, listSeries } from './adapter.js';
+import { replayAdapter, listSeries } from './adapter.js';
 import { buildLevelSeries, buildStrikeOrbs, parseValue } from './levels.js';
 import { createAtlasChart } from './chart.js';
 
 const $ = (sel) => document.querySelector(sel);
 
-// Current series state, so orb mode can re-render without refetching.
-const state = { frames: [], lastTime: null, orbMode: 'net', orbMin: 0.25 };
+const state = {
+  frames: [],
+  frameIndex: 0,
+  playing: false,
+  timer: null,
+  lastTime: null,      // right edge of the bar series (secs)
+  orbMode: 'net',
+  orbMin: 0.25,
+  symbol: null,
+  derivedFrom: null,
+  note: null,
+};
+
+const frameTime = (f) => Math.floor(Date.parse(f.capturedAt) / 1000);
+const atLive = () => state.frameIndex >= state.frames.length - 1;
 
 function renderOrbs(atlas) {
   atlas.setStrikeOrbs(
@@ -19,36 +33,103 @@ function renderOrbs(atlas) {
   );
 }
 
+// ---------- trading day + snapshot clock (same display as gex-replay-basic:
+// Trading Day = the 8 PM ET session roll; Snapshot = exact ET date+time, so
+// overnight frames read e.g. "Trading Day 7/6 · Snapshot 7/5 8:00 PM") ------
+function fmtTradingDay(td) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(td || '');
+  return m ? `${m[2]}/${m[3]}/${m[1]}` : (td || '—');
+}
+function fmtSnapET(capturedAt) {
+  const d = capturedAt ? new Date(capturedAt) : null;
+  if (!d || isNaN(d)) return '—';
+  return d.toLocaleString('en-US', {
+    timeZone: 'America/New_York', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
+  });
+}
+
+// ---------- replay transport ----------
+function step() { return parseInt($('#stepSelect').value, 10) || 1; }
+function fps() { return 2 * parseFloat($('#speedSelect').value); }
+
+function showFrame(atlas, idx) {
+  const frames = state.frames;
+  if (!frames.length) return;
+  idx = Math.max(0, Math.min(frames.length - 1, idx));
+  state.frameIndex = idx;
+  const frame = frames[idx];
+
+  // Chart shows only what was known at the playhead; at the newest frame the
+  // truncation lifts and you get the full live view.
+  atlas.setReplayTime(atLive() ? null : frameTime(frame));
+  renderHeatmap(frame);
+
+  $('#price').textContent = frame.price != null ? Number(frame.price).toFixed(2) : '—';
+  const net = frame.netExposureValue ?? parseValue(String(frame.netExposure).replace(/[$,]/g, ''));
+  $('#net').textContent = net ? `Net GEX ${fmtDollars(net)}` : '';
+  $('#tradingDay').textContent = fmtTradingDay(frame.tradingDay);
+  $('#snapET').textContent = fmtSnapET(frame.capturedAt);
+  $('#scrubber').value = String(idx);
+  $('#frameLabel').textContent = `${idx + 1} / ${frames.length}`;
+}
+
+function play(atlas) {
+  if (state.frames.length < 2) return;
+  if (atLive()) showFrame(atlas, 0); // replay from the top when already live
+  state.playing = true;
+  const btn = $('#playBtn');
+  btn.textContent = '⏸';
+  btn.classList.add('playing');
+  scheduleTick(atlas);
+}
+function scheduleTick(atlas) {
+  clearTimeout(state.timer);
+  state.timer = setTimeout(() => {
+    if (!state.playing) return;
+    const next = state.frameIndex + step();
+    showFrame(atlas, next);
+    if (atLive()) { stop(); return; } // reached the live edge
+    scheduleTick(atlas);
+  }, 1000 / fps());
+}
+function stop() {
+  state.playing = false;
+  clearTimeout(state.timer);
+  const btn = $('#playBtn');
+  btn.textContent = '▶';
+  btn.classList.remove('playing');
+}
+
 async function loadSeries(atlas, symbol) {
-  const { bars, frames, derivedFrom, note } = await sampleAdapter(symbol);
-  const { levels, netExposure } = buildLevelSeries(frames);
-  state.frames = frames;
+  stop();
+  const { bars, frames, derivedFrom, note } = await replayAdapter(symbol);
+  const { levels } = buildLevelSeries(frames);
+  Object.assign(state, { frames, symbol, derivedFrom, note });
   state.lastTime = bars[bars.length - 1]?.t;
 
   atlas.setBars(bars);
   atlas.setLevels(levels, state.lastTime);
   renderOrbs(atlas);
   atlas.fit();
-  renderHeatmap(frames[frames.length - 1]);
 
-  const last = bars[bars.length - 1];
-  const first = frames[0];
   $('#symbol').textContent = symbol + (derivedFrom ? ` (derived ← ${derivedFrom})` : '');
-  $('#price').textContent = last ? last.c.toFixed(2) : '—';
-  const lastNet = netExposure[netExposure.length - 1];
-  $('#net').textContent = lastNet ? `Net GEX ${fmtDollars(lastNet.value)}` : '';
-  const firstDay = first?.tradingDay ?? '';
+  const firstDay = frames[0]?.tradingDay ?? '';
   const lastDay = frames[frames.length - 1]?.tradingDay ?? '';
-  $('#meta').textContent =
-    `${frames.length} snapshots · ${firstDay}${lastDay && lastDay !== firstDay ? ' → ' + lastDay : ''} · sample data` +
+  $('#meta').innerHTML =
+    `${frames.length} snapshots · ${firstDay}${lastDay && lastDay !== firstDay ? ' → ' + lastDay : ''}` +
+    ` · data: <a href="https://github.com/shurwatrader/gex-replay-basic">gex-replay-basic</a> format` +
     (note ? ` · ${note}` : '');
+
+  $('#scrubber').max = String(Math.max(0, frames.length - 1));
+  showFrame(atlas, frames.length - 1); // start at the live edge (full session)
 }
 
 async function main() {
   const atlas = createAtlasChart($('#chart'), $('#flow'));
   window.__atlas = atlas; // dev/debug handle
 
-  // Ticker switcher from the sample manifest
+  // Ticker switcher straight from the gex-replay-basic manifest
   const tickerSel = $('#ticker');
   for (const s of await listSeries()) {
     const opt = document.createElement('option');
@@ -114,15 +195,34 @@ async function main() {
   });
   togglesEl.appendChild(deltaChip);
 
-  // Heatmap sidecar toggle
+  // Heatmap sidecar toggle — on by default: the board and the chart together
+  // are the whole point of the replay view.
   const hmChip = document.createElement('button');
-  hmChip.className = 'chip';
+  hmChip.className = 'chip on';
   hmChip.innerHTML = '<span class="dot" style="background:#7e57c2"></span>Heatmap';
   hmChip.addEventListener('click', () => {
     const on = hmChip.classList.toggle('on');
     $('#sidecar').classList.toggle('hidden', !on);
   });
   togglesEl.appendChild(hmChip);
+
+  // Replay transport — identical wiring to gex-replay-basic
+  $('#playBtn').onclick = () => (state.playing ? stop() : play(atlas));
+  $('#nextBtn').onclick = () => { stop(); showFrame(atlas, state.frameIndex + step()); };
+  $('#prevBtn').onclick = () => { stop(); showFrame(atlas, state.frameIndex - step()); };
+  $('#firstBtn').onclick = () => { stop(); showFrame(atlas, 0); };
+  $('#lastBtn').onclick = () => { stop(); showFrame(atlas, state.frames.length - 1); };
+  $('#scrubber').oninput = () => { stop(); showFrame(atlas, +$('#scrubber').value); };
+  $('#speedSelect').onchange = () => { if (state.playing) scheduleTick(atlas); };
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+    if (e.code === 'Space') { e.preventDefault(); state.playing ? stop() : play(atlas); }
+    else if (e.code === 'ArrowRight') { stop(); showFrame(atlas, state.frameIndex + step()); }
+    else if (e.code === 'ArrowLeft') { stop(); showFrame(atlas, state.frameIndex - step()); }
+    else if (e.code === 'Home') { stop(); showFrame(atlas, 0); }
+    else if (e.code === 'End') { stop(); showFrame(atlas, state.frames.length - 1); }
+  });
 
   // Timeframe tabs are cosmetic in the demo (one sample resolution).
   document.querySelectorAll('.tf').forEach((btn) =>
@@ -134,10 +234,10 @@ async function main() {
 }
 
 /**
- * Latest-frame heatmap sidecar: strike × expiry grid of the most recent
- * snapshot, diverging color scale (purple = negative GEX, teal→green =
- * positive), sqrt-compressed, anchored to the frame's own min/max — the
- * same scheme as gex-replay. Shows the ~40 heaviest strikes.
+ * Heatmap sidecar: the strike × expiry board at the playhead frame —
+ * gex-replay-basic's grid, docked beside the chart and scrubbing in sync.
+ * Diverging color scale (purple = negative GEX, teal→green = positive),
+ * sqrt-compressed, anchored to the frame's own min/max. ~40 heaviest strikes.
  */
 function renderHeatmap(frame, maxRows = 40) {
   const el = $('#heatmap');
@@ -179,10 +279,7 @@ function renderHeatmap(frame, maxRows = 40) {
       .join('');
   }
   el.innerHTML = html;
-  $('#sidecar-time').textContent = new Date(frame.capturedAt).toLocaleString('en-US', {
-    timeZone: 'America/New_York', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: '2-digit', timeZoneName: 'short',
-  });
+  $('#sidecar-time').textContent = fmtSnapET(frame.capturedAt);
 }
 
 function fmtDollars(v) {

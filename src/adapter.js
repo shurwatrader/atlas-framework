@@ -4,8 +4,12 @@
  * Atlas is deliberately split so the chart never knows where data came from.
  * Today there are two adapters:
  *
- *   sampleAdapter  — reads the static JSON in data/sample/ (the gex-replay
- *                    scrape format + a bars file). This is the demo path.
+ *   replayAdapter  — reads a gex-replay-basic data folder VERBATIM: the same
+ *                    data/manifest.json and data/<slug>/<date>.json.gz bundles
+ *                    that repo publishes. Atlas ships with a copy in ./data,
+ *                    or point ?source=<url> at a live gex-replay-basic
+ *                    deployment and read its published snapshots directly.
+ *                    Bars are the one thing Atlas adds on top (data/bars/).
  *   quantumAdapter — STUB. The shape Quantum would fill in if the terminal
  *                    exposes its data directly (see docs/DATA_CONTRACT.md).
  *
@@ -13,52 +17,60 @@
  *   { bars: [{t,o,h,l,c,v}], frames: [rawGexFrame, ...] }
  */
 
+// Where the gex-replay-basic data folder lives. Default: the copy bundled in
+// this repo. Override per-visit with ?source=… (no trailing slash needed),
+// e.g. ?source=https://shurwatrader.github.io/gex-replay-basic
+const SOURCE = (
+  new URLSearchParams(location.search).get('source') || '.'
+).replace(/\/+$/, '');
+
+async function fetchJson(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  return res.json();
+}
+
+// Same decompression path as gex-replay-basic's readBundle().
+async function fetchBundle(url) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  if (!url.endsWith('.gz')) return res.json();
+  const ds = new DecompressionStream('gzip');
+  const text = await new Response(res.body.pipeThrough(ds)).text();
+  return JSON.parse(text);
+}
+
+/** The parent repo's manifest, as-is: [{ slug, symbol, title, dates }]. */
 export async function listSeries() {
-  const res = await fetch('data/sample/manifest.json');
-  return (await res.json()).series;
+  return (await fetchJson(`${SOURCE}/data/manifest.json`)).series;
 }
 
-export async function sampleAdapter(symbol = 'MU') {
+export async function replayAdapter(symbol = 'MU') {
   const series = (await listSeries()).find((s) => s.symbol === symbol);
-  if (!series) throw new Error(`No sample series for ${symbol}`);
-  const gexFiles = Array.isArray(series.gex) ? series.gex : [series.gex];
-  const [barsFile, ...gexBundles] = await Promise.all([
-    fetch(series.bars).then((r) => r.json()),
-    ...gexFiles.map((f) => fetch(f).then((r) => r.json())),
-  ]);
-  const frames = gexBundles
-    .flatMap((b) => (b.slim ? expandSlim(b) : b.frames))
-    .sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
-  return {
-    symbol: barsFile.symbol,
-    bars: barsFile.bars,
-    frames,
-    derivedFrom: barsFile.derivedFrom ?? null,
-    note: series.note ?? null,
-  };
-}
+  if (!series) throw new Error(`No series for ${symbol} in the manifest`);
 
-/**
- * Expand the slim day format (scripts/slim_bundle.py) back into the standard
- * frame shape the rest of the app consumes. Slim rows are
- * [strike, vK1, vK2, ...] with values in $K; kings are per-frame strikes.
- */
-function expandSlim(file) {
-  return file.frames.map((f) => ({
-    capturedAt: new Date(f.t * 1000).toISOString(),
-    tradingDay: file.date,
-    price: f.price,
-    netExposureValue: f.net,
-    expiries: f.expiries,
-    rows: f.rows.map(([strike, ...vals]) => ({
-      strike,
-      values: vals.map((v, i) => ({
-        text: String(v * 1000),
-        oiKing: strike === f.kingOI && i === 0,
-        volKing: strike === f.kingVol && i === 0,
-      })),
-    })),
-  }));
+  // Every trading day the parent publishes for this series, oldest first —
+  // Atlas's whole point is levels over time, so load the full history.
+  const dates = (series.dates || [])
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const [bars, ...bundles] = await Promise.all([
+    fetchJson(`data/bars/${symbol}_5m.json`), // bars are Atlas-local, never remote
+    ...dates.map((d) => fetchBundle(`${SOURCE}/${d.file}`)),
+  ]);
+
+  const frames = bundles
+    .flatMap((b) => b.frames || [])
+    .sort((a, b) => Date.parse(a.capturedAt) - Date.parse(b.capturedAt));
+
+  return {
+    symbol: bars.symbol ?? symbol,
+    bars: bars.bars,
+    frames,
+    derivedFrom: bars.derivedFrom ?? null,
+    note: bars.note ?? null,
+  };
 }
 
 /**

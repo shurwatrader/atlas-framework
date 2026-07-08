@@ -4,7 +4,7 @@
     {
       "name": "atlas",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "8231", "--directory", "C:/Users/jalee/Downloads/atlas-framework"],
+      "runtimeArgs": ["-m", "http.server", "8231", "--directory", "C:/Users/jalee/Documents/GitHub/atlas-framework"],
       "port": 8231
     }
   ]
