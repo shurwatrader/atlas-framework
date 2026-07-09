@@ -54,7 +54,8 @@ export function createAtlasChart(container, flowContainer) {
     truncTime: null,     // replay playhead (null = live view)
     freezeScale: false,  // during playback: pin the price axis (no rescale)
     frozen: null,        // { min, max } the price axis is pinned to
-    lockLogical: null,   // during playback: the bar-index frame to hold
+    userRange: null,     // during playback: the bar-index window to hold
+    applying: false,     // guard: our own setData, not a user zoom/pan
   };
 
   // Orb layer FIRST so candles (created after) always paint on top of the
@@ -76,9 +77,10 @@ export function createAtlasChart(container, flowContainer) {
     upColor: '#d1d4dc', downColor: '#5d6b8a',
     wickUpColor: '#d1d4dc', wickDownColor: '#5d6b8a',
     borderVisible: false,
-    // During playback pin the price axis to the range it showed when play
-    // began, so revealing candles can't rescale it. Otherwise defer to the
-    // library's normal per-view autoscale (adaptive while scrubbing).
+    // During playback pin the price axis to cache.frozen (the range of the
+    // bars currently in view) so revealing candles can't rescale it. When
+    // you zoom/pan mid-play, cache.frozen is recomputed for the new window
+    // (see refreezePriceToView). Paused: defer to normal per-view autoscale.
     autoscaleInfoProvider: (orig) =>
       cache.freezeScale && cache.frozen
         ? { priceRange: { minValue: cache.frozen.min, maxValue: cache.frozen.max } }
@@ -113,6 +115,36 @@ export function createAtlasChart(container, flowContainer) {
   flowChart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
     if (r) chart.timeScale().setVisibleLogicalRange(r);
   });
+
+  // While playing, a user zoom/pan fires this — adopt the new window as the
+  // one to hold and refit the frozen price range to it, so candles fill the
+  // zoom. Our own setData (cache.applying) is skipped, so steady playback
+  // holds the stored window and stays rock-still.
+  chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
+    if (!cache.freezeScale || cache.applying) return;
+    cache.userRange = chart.timeScale().getVisibleLogicalRange();
+    refreezePriceToView();
+  });
+
+  // Pin the price axis to the price range of the bars in the current view
+  // (future bars included — they'll reveal, and the axis mustn't jump then).
+  function refreezePriceToView() {
+    const lr = chart.timeScale().getVisibleLogicalRange();
+    if (!lr || !cache.bars.length) return;
+    const lo = Math.max(0, Math.floor(lr.from));
+    const hi = Math.min(cache.bars.length - 1, Math.ceil(lr.to));
+    let mn = Infinity, mx = -Infinity;
+    for (let i = lo; i <= hi; i++) {
+      const b = cache.bars[i];
+      if (b.l < mn) mn = b.l;
+      if (b.h > mx) mx = b.h;
+    }
+    if (mn < mx) {
+      const pad = (mx - mn) * 0.08;
+      cache.frozen = { min: mn - pad, max: mx + pad };
+      chart.priceScale('right').applyOptions({ autoScale: true }); // provider re-reads
+    }
+  }
 
   const upTo = (points, t) =>
     t == null ? points : points.filter((p) => p.time <= t);
@@ -259,39 +291,41 @@ export function createAtlasChart(container, flowContainer) {
     setReplayTime(t) {
       if (cache.truncTime === t) return;
       cache.truncTime = t;
+      // During playback, re-assert the stored window (updated only by user
+      // gestures) after setData — which otherwise auto-scrolls to the last
+      // real bar. Re-applying the same stored value each tick is idempotent,
+      // so there's no compounding drift. The applying guard keeps this from
+      // being mistaken for a user zoom.
+      cache.applying = true;
       renderBars();
       renderLevels();
       renderOrbField();
-      // Re-assert the locked frame: setData auto-scrolls to the last *real*
-      // bar, so without this the view would creep as candles reveal.
-      if (cache.lockLogical) chart.timeScale().setVisibleLogicalRange(cache.lockLogical);
+      if (cache.freezeScale && cache.userRange) {
+        chart.timeScale().setVisibleLogicalRange(cache.userRange);
+      }
+      cache.applying = false;
     },
 
     /**
-     * Playback lock: on start, frame the whole session by bar index and pin
-     * the price axis to the full session's range, so every revealing candle
-     * stays in view and nothing rescales or scrolls. On stop, release both
-     * and hand the axes back to normal interaction.
+     * Playback view mode. On start: frame the whole session once, then pin
+     * the price axis to what's in view — but the user stays free to zoom/pan
+     * (the frame follows their gesture and refits price to it). Nothing moves
+     * on its own. On stop: hand the axes back to normal adaptive autoscale.
      */
     freezeScale(on) {
       if (on && cache.bars.length) {
-        const n = cache.bars.length;
-        cache.lockLogical = { from: -1, to: n };
-        chart.timeScale().setVisibleLogicalRange(cache.lockLogical);
-        let lo = Infinity, hi = -Infinity;
-        for (const b of cache.bars) {
-          if (b.l < lo) lo = b.l;
-          if (b.h > hi) hi = b.h;
-        }
-        const pad = (hi - lo) * 0.08;
-        cache.frozen = { min: lo - pad, max: hi + pad };
         cache.freezeScale = true;
+        cache.userRange = { from: -1, to: cache.bars.length }; // whole session
+        cache.applying = true;
+        chart.timeScale().setVisibleLogicalRange(cache.userRange);
+        cache.applying = false;
+        refreezePriceToView();
       } else {
         cache.freezeScale = false;
-        cache.lockLogical = null;
+        cache.frozen = null;
+        cache.userRange = null;
+        chart.priceScale('right').applyOptions({ autoScale: true });
       }
-      // Re-trigger an autoscale pass so the provider's new answer takes effect.
-      chart.priceScale('right').applyOptions({ autoScale: true });
     },
 
     fit() { chart.timeScale().fitContent(); },
