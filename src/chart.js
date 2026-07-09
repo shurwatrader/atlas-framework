@@ -43,6 +43,20 @@ export function createAtlasChart(container, flowContainer) {
   const chart = createChart(container, { ...common, autoSize: true });
   const flowChart = createChart(flowContainer, { ...common, autoSize: true });
 
+  // Full-session cache — the replay playhead re-slices from here.
+  const cache = {
+    bars: [],
+    levels: {},          // key -> [{time, value, strength}]
+    orbs: [],            // [{strike, points}]
+    orbMode: 'net',
+    orbMinFrac: 0,
+    endTime: null,       // right edge levels/orbs extend to in live view
+    truncTime: null,     // replay playhead (null = live view)
+    freezeScale: false,  // during playback: pin the price axis (no rescale)
+    frozen: null,        // { min, max } the price axis is pinned to
+    lockLogical: null,   // during playback: the bar-index frame to hold
+  };
+
   // Orb layer FIRST so candles (created after) always paint on top of the
   // pressure field — orbs glow behind price, never over it. Fixed pool of
   // series, reused across loads (creation order is z-order in v4).
@@ -62,6 +76,13 @@ export function createAtlasChart(container, flowContainer) {
     upColor: '#d1d4dc', downColor: '#5d6b8a',
     wickUpColor: '#d1d4dc', wickDownColor: '#5d6b8a',
     borderVisible: false,
+    // During playback pin the price axis to the range it showed when play
+    // began, so revealing candles can't rescale it. Otherwise defer to the
+    // library's normal per-view autoscale (adaptive while scrubbing).
+    autoscaleInfoProvider: (orig) =>
+      cache.freezeScale && cache.frozen
+        ? { priceRange: { minValue: cache.frozen.min, maxValue: cache.frozen.max } }
+        : orig(),
   });
 
   const levelSeries = {};
@@ -84,17 +105,6 @@ export function createAtlasChart(container, flowContainer) {
   const flow = flowChart.addHistogramSeries({ priceFormat: { type: 'volume' } });
 
   let orbsVisible = true;
-
-  // Full-session cache — the replay playhead re-slices from here.
-  const cache = {
-    bars: [],
-    levels: {},          // key -> [{time, value, strength}]
-    orbs: [],            // [{strike, points}]
-    orbMode: 'net',
-    orbMinFrac: 0,
-    endTime: null,       // right edge levels/orbs extend to in live view
-    truncTime: null,     // replay playhead (null = live view)
-  };
 
   // Keep both panes' time axes locked together.
   chart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
@@ -124,15 +134,22 @@ export function createAtlasChart(container, flowContainer) {
 
   function renderBars() {
     const t = cache.truncTime;
-    const bars = t == null ? cache.bars : cache.bars.filter((b) => b.t <= t);
-    candles.setData(bars.map((b) => ({ time: b.t, open: b.o, high: b.h, low: b.l, close: b.c })));
+    const shown = (b) => t == null || b.t <= t;
+    // Bars past the playhead become whitespace ({time} only): they still
+    // occupy their slot, so the time axis extent never changes and the chart
+    // can't auto-scroll to "follow" newly revealed candles during playback.
+    candles.setData(cache.bars.map((b) => shown(b)
+      ? { time: b.t, open: b.o, high: b.h, low: b.l, close: b.c }
+      : { time: b.t }));
     // Demo flow: signed volume (up bar = +v, down bar = -v). Production
     // replaces this with true signed options flow per DATA_CONTRACT.md.
-    flow.setData(bars.map((b) => ({
-      time: b.t,
-      value: b.c >= b.o ? b.v : -b.v,
-      color: b.c >= b.o ? 'rgba(120,144,220,0.85)' : 'rgba(139,147,167,0.6)',
-    })));
+    flow.setData(cache.bars.map((b) => shown(b)
+      ? {
+          time: b.t,
+          value: b.c >= b.o ? b.v : -b.v,
+          color: b.c >= b.o ? 'rgba(120,144,220,0.85)' : 'rgba(139,147,167,0.6)',
+        }
+      : { time: b.t }));
   }
 
   function renderLevels() {
@@ -235,17 +252,46 @@ export function createAtlasChart(container, flowContainer) {
 
     /**
      * Move the replay playhead: everything re-renders truncated to time <= t.
-     * Pass null to return to the live (full-session) view. The visible time
-     * window is preserved so scrubbing doesn't yank the viewport around.
+     * Pass null to return to the live (full-session) view. Future bars stay
+     * as whitespace, so the time axis extent is constant and the view holds
+     * still — no save/restore dance needed.
      */
     setReplayTime(t) {
       if (cache.truncTime === t) return;
       cache.truncTime = t;
-      const view = chart.timeScale().getVisibleRange();
       renderBars();
       renderLevels();
       renderOrbField();
-      if (view) chart.timeScale().setVisibleRange(view);
+      // Re-assert the locked frame: setData auto-scrolls to the last *real*
+      // bar, so without this the view would creep as candles reveal.
+      if (cache.lockLogical) chart.timeScale().setVisibleLogicalRange(cache.lockLogical);
+    },
+
+    /**
+     * Playback lock: on start, frame the whole session by bar index and pin
+     * the price axis to the full session's range, so every revealing candle
+     * stays in view and nothing rescales or scrolls. On stop, release both
+     * and hand the axes back to normal interaction.
+     */
+    freezeScale(on) {
+      if (on && cache.bars.length) {
+        const n = cache.bars.length;
+        cache.lockLogical = { from: -1, to: n };
+        chart.timeScale().setVisibleLogicalRange(cache.lockLogical);
+        let lo = Infinity, hi = -Infinity;
+        for (const b of cache.bars) {
+          if (b.l < lo) lo = b.l;
+          if (b.h > hi) hi = b.h;
+        }
+        const pad = (hi - lo) * 0.08;
+        cache.frozen = { min: lo - pad, max: hi + pad };
+        cache.freezeScale = true;
+      } else {
+        cache.freezeScale = false;
+        cache.lockLogical = null;
+      }
+      // Re-trigger an autoscale pass so the provider's new answer takes effect.
+      chart.priceScale('right').applyOptions({ autoScale: true });
     },
 
     fit() { chart.timeScale().fitContent(); },

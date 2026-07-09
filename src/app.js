@@ -78,6 +78,7 @@ function play(atlas) {
   if (state.frames.length < 2) return;
   if (atLive()) showFrame(atlas, 0); // replay from the top when already live
   state.playing = true;
+  atlas.freezeScale(true); // hold the view still while playing
   const btn = $('#playBtn');
   btn.textContent = '⏸';
   btn.classList.add('playing');
@@ -96,6 +97,7 @@ function scheduleTick(atlas) {
 function stop() {
   state.playing = false;
   clearTimeout(state.timer);
+  state.atlas?.freezeScale(false); // hand the axis back to adaptive autoscale
   const btn = $('#playBtn');
   btn.textContent = '▶';
   btn.classList.remove('playing');
@@ -135,6 +137,7 @@ async function loadSeries(atlas, symbol) {
 
 async function main() {
   const atlas = createAtlasChart($('#chart'), $('#flow'));
+  state.atlas = atlas;    // so stop() can release the playback scale lock
   window.__atlas = atlas; // dev/debug handle
 
   // Ticker switcher straight from the gex-replay-basic manifest
