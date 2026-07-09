@@ -64,7 +64,9 @@ Concretely, "built on top of" means:
 - **Ticker switcher** — MU, SPY, SPX (derived), TSLA, straight from the
   gex-replay-basic manifest, each pairing real 5m bars with that ticker's
   scraped GEX-OI board
-- **Candlestick chart** (real 5m OHLCV, all sessions incl. overnight)
+- **Candlestick chart** — 2-minute OHLCV through the day session, matching
+  the snapshot cadence (the overnight stretch is 5m — no overnight 1m feed
+  in the demo); all sessions shown, overnight included
 - **Replay transport** — scrub/play the session and watch price, levels, orbs
   and the heatmap advance together, frame by frame
 - **Strike Orbs** — the heatmap's pressure field drawn on price: the
@@ -234,8 +236,10 @@ docs/DATA_CONTRACT.md the endpoints/schemas the terminal would provide
   [`docs/DATA_PIPELINE.md`](https://github.com/shurwatrader/gex-replay-basic/blob/main/docs/DATA_PIPELINE.md)).
   The terminal's own private API (`/api/v1/gex-all/...`) already returns richer
   data than the scrape; a sanctioned feed makes the scrape obsolete on day one.
-- Bars: MU/SPY/TSLA 5m OHLCV, Jul 2–7 2026, all sessions, via a broker API;
-  SPX derived from SPY × 10.03.
+- Bars: MU/SPY/TSLA OHLCV for the replay tape (Jul 5–6 2026) — 2m through
+  the day session (Yahoo 1m, aggregated), 5m for the overnight stretch (via
+  a broker API; the demo has no overnight 1m feed); SPX derived from
+  SPY × 10.03. The `_5m.json` files remain as a fallback timeframe.
 - Charting: [TradingView Lightweight Charts](https://github.com/tradingview/lightweight-charts)
   (MIT) via CDN.
 

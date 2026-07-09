@@ -19,6 +19,23 @@
  *   spot      — underlying price at capture time
  */
 
+/**
+ * Snap a timestamp onto the chart's bar grid: the latest bar time <= t
+ * (binary search; null if t predates the first bar). Lightweight Charts
+ * merges every series' timestamps into one time axis, so a level/orb point
+ * between two bars would inject an empty slot and spread the candles apart —
+ * every point we draw must sit exactly on an existing bar time.
+ */
+export function snapToBar(t, barTimes) {
+  if (!barTimes?.length || t < barTimes[0]) return null;
+  let lo = 0, hi = barTimes.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (barTimes[mid] <= t) lo = mid; else hi = mid - 1;
+  }
+  return barTimes[lo];
+}
+
 /** Parse a display value like "-560.16M", "25.2K", "1.72B", "0" into a number. */
 export function parseValue(text) {
   if (text == null) return 0;
@@ -116,9 +133,10 @@ export function findGexZero(totals, spot) {
  *
  * @returns [{ strike, points: [{ time, strength, sign }] }]
  */
-export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range = null } = {}) {
+export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range = null, snapTo = null } = {}) {
   const perFrame = frames.map((frame) => {
-    const time = Math.floor(Date.parse(frame.capturedAt) / 1000);
+    const raw = Math.floor(Date.parse(frame.capturedAt) / 1000);
+    const time = snapTo ? snapToBar(raw, snapTo) : raw;
     const totals = new Map();
     for (const row of frame.rows) {
       totals.set(row.strike, row.values.reduce((s, v) => s + parseValue(v.text), 0));
@@ -126,22 +144,28 @@ export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range =
     return { time, totals };
   });
 
-  // Per-strike point series in the chosen mode.
+  // Per-strike point series in the chosen mode. When several frames snap to
+  // the same bar, the last one wins (the bar's closing state).
   const strikes = new Set(perFrame.flatMap((f) => [...f.totals.keys()]));
   const built = new Map();
   for (const strike of strikes) {
     if (range && (strike < range.min || strike > range.max)) continue;
     const points = [];
+    const push = (p) => {
+      if (points.length && points[points.length - 1].time === p.time) points[points.length - 1] = p;
+      else points.push(p);
+    };
     for (let i = 0; i < perFrame.length; i++) {
       const { time, totals } = perFrame[i];
+      if (time == null) continue; // frame predates the bar series
       const total = totals.get(strike) ?? 0;
       if (mode === 'delta') {
         if (i === 0) continue; // no previous frame to diff against
         const prev = perFrame[i - 1].totals.get(strike) ?? 0;
         const d = total - prev;
-        points.push({ time, strength: Math.abs(d), sign: Math.sign(d) });
+        push({ time, strength: Math.abs(d), sign: Math.sign(d) });
       } else {
-        points.push({ time, strength: Math.abs(total), sign: Math.sign(total) });
+        push({ time, strength: Math.abs(total), sign: Math.sign(total) });
       }
     }
     built.set(strike, points);
@@ -164,16 +188,23 @@ export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range =
  * ready to hand to the chart as stepped lines.
  * @returns {object} map of levelKey -> [{ time, value }]
  */
-export function buildLevelSeries(frames) {
+export function buildLevelSeries(frames, { snapTo = null } = {}) {
   const keys = ['callWall', 'putWall', 'oiKing', 'volKing', 'gex0'];
   const series = Object.fromEntries(keys.map((k) => [k, []]));
   const net = [];
+  const push = (arr, p) => {
+    // several frames snapping to one bar → last one wins
+    if (arr.length && arr[arr.length - 1].time === p.time) arr[arr.length - 1] = p;
+    else arr.push(p);
+  };
   for (const frame of frames) {
     const lv = deriveLevels(frame);
+    const time = snapTo ? snapToBar(lv.time, snapTo) : lv.time;
+    if (time == null) continue; // frame predates the bar series
     for (const k of keys) {
-      if (lv[k] != null) series[k].push({ time: lv.time, value: lv[k], strength: lv.strength[k] });
+      if (lv[k] != null) push(series[k], { time, value: lv[k], strength: lv.strength[k] });
     }
-    net.push({ time: lv.time, value: lv.netExposure });
+    push(net, { time, value: lv.netExposure });
   }
   return { levels: series, netExposure: net };
 }

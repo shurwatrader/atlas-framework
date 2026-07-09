@@ -40,6 +40,13 @@ async function fetchBundle(url) {
   return JSON.parse(text);
 }
 
+// Finest bar file available wins: 2m (matches the snapshot cadence; its
+// overnight stretch is 5m — no overnight 1m feed in the demo), else 5m.
+async function fetchBars(symbol) {
+  try { return await fetchJson(`data/bars/${symbol}_2m.json`); }
+  catch { return fetchJson(`data/bars/${symbol}_5m.json`); }
+}
+
 /** The parent repo's manifest, as-is: [{ slug, symbol, title, dates }]. */
 export async function listSeries() {
   return (await fetchJson(`${SOURCE}/data/manifest.json`)).series;
@@ -56,7 +63,7 @@ export async function replayAdapter(symbol = 'MU') {
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const [bars, ...bundles] = await Promise.all([
-    fetchJson(`data/bars/${symbol}_5m.json`), // bars are Atlas-local, never remote
+    fetchBars(symbol), // bars are Atlas-local, never remote
     ...dates.map((d) => fetchBundle(`${SOURCE}/${d.file}`)),
   ]);
 

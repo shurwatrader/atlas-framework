@@ -43,6 +43,21 @@ export function createAtlasChart(container, flowContainer) {
   const chart = createChart(container, { ...common, autoSize: true });
   const flowChart = createChart(flowContainer, { ...common, autoSize: true });
 
+  // Orb layer FIRST so candles (created after) always paint on top of the
+  // pressure field — orbs glow behind price, never over it. Fixed pool of
+  // series, reused across loads (creation order is z-order in v4).
+  const ORB_POOL = 24;
+  const orbSeries = [];
+  for (let i = 0; i < ORB_POOL; i++) {
+    orbSeries.push(chart.addLineSeries({
+      color: 'rgba(0,0,0,0)', // orbs only — no connecting line
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null, // never stretch the price axis
+    }));
+  }
+
   const candles = chart.addCandlestickSeries({
     upColor: '#d1d4dc', downColor: '#5d6b8a',
     wickUpColor: '#d1d4dc', wickDownColor: '#5d6b8a',
@@ -68,9 +83,6 @@ export function createAtlasChart(container, flowContainer) {
 
   const flow = flowChart.addHistogramSeries({ priceFormat: { type: 'volume' } });
 
-  // Per-strike orb field: one invisible line series per heavy strike, whose
-  // markers are the orbs (size = node strength, color = GEX sign).
-  let orbSeries = [];
   let orbsVisible = true;
 
   // Full-session cache — the replay playhead re-slices from here.
@@ -95,6 +107,21 @@ export function createAtlasChart(container, flowContainer) {
   const upTo = (points, t) =>
     t == null ? points : points.filter((p) => p.time <= t);
 
+  // The right edge levels/orbs extend to must also be a real bar time —
+  // any other timestamp would inject an empty slot into the time axis.
+  function snappedEdge() {
+    const t = cache.truncTime ?? cache.endTime;
+    if (t == null) return null;
+    const bars = cache.bars;
+    if (!bars.length || t < bars[0].t) return null;
+    let lo = 0, hi = bars.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (bars[mid].t <= t) lo = mid; else hi = mid - 1;
+    }
+    return bars[lo].t;
+  }
+
   function renderBars() {
     const t = cache.truncTime;
     const bars = t == null ? cache.bars : cache.bars.filter((b) => b.t <= t);
@@ -111,7 +138,7 @@ export function createAtlasChart(container, flowContainer) {
   function renderLevels() {
     // Levels are pure indicators: a stepped dotted line that re-positions
     // every snapshot — no markers. Strength/pressure lives in the orb field.
-    const edge = cache.truncTime ?? cache.endTime;
+    const edge = snappedEdge();
     for (const [key, series] of Object.entries(levelSeries)) {
       const points = upTo(cache.levels[key] ?? [], cache.truncTime);
       const data = points.map(({ time, value }) => ({ time, value }));
@@ -139,22 +166,17 @@ export function createAtlasChart(container, flowContainer) {
     const palette = cache.orbMode === 'delta'
       ? { pos: '102,187,106', neg: '239,83,80' }
       : { pos: '38,166,154', neg: '126,87,194' }; // heatmap cell hues
-    // One series per heavy strike, recreated only when the orb set changes;
-    // replay ticks reuse them (see setReplayTime).
-    while (orbSeries.length < cache.orbs.length) {
-      orbSeries.push(chart.addLineSeries({
-        color: 'rgba(0,0,0,0)', // orbs only — no connecting line
-        lastValueVisible: false,
-        priceLineVisible: false,
-        crosshairMarkerVisible: false,
-        autoscaleInfoProvider: () => null, // never stretch the price axis
-      }));
+    // Fixed pool of series (created under the candles at init); slots beyond
+    // the current orb set are cleared, never removed.
+    const orbs = cache.orbs.slice(0, orbSeries.length);
+    for (let i = orbs.length; i < orbSeries.length; i++) {
+      orbSeries[i].setData([]);
+      orbSeries[i].setMarkers([]);
     }
-    while (orbSeries.length > cache.orbs.length) chart.removeSeries(orbSeries.pop());
 
-    const maxStrength = Math.max(1, ...cache.orbs.flatMap((o) => o.points.map((p) => p.strength)));
-    const edge = cache.truncTime ?? cache.endTime;
-    cache.orbs.forEach(({ strike, points }, i) => {
+    const maxStrength = Math.max(1, ...orbs.flatMap((o) => o.points.map((p) => p.strength)));
+    const edge = snappedEdge();
+    orbs.forEach(({ strike, points }, i) => {
       const visible = upTo(points, cache.truncTime);
       const series = orbSeries[i];
       series.applyOptions({ visible: orbsVisible });
