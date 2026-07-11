@@ -81,19 +81,59 @@ header {
 }
 .chip.on { opacity: 1; color: var(--text); }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-#orbmin {
+
+/* Orb count slider — pick the N heaviest strikes (1–10) */
+.orbcount {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   background: var(--bg);
-  color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 3px 8px;
+  padding: 2px 10px;
   font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.orbcount input[type="range"] {
+  width: 88px;
+  height: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.orbcount-val {
+  min-width: 58px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-family: Consolas, monospace;
 }
 
 main { flex: 1; display: flex; flex-direction: column; min-height: 0; padding: 0 8px; }
 .chart-row { flex: 1; display: flex; min-height: 0; gap: 8px; }
 .chart-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-#chart { flex: 3; min-height: 0; }
+#chart { flex: 3; min-height: 0; position: relative; }
+
+/* Optimal-view button — floats over the chart's bottom-right corner (clear of
+   the right price axis), same dark chip look as the transport controls. */
+.fit-btn {
+  position: absolute;
+  right: 62px;
+  bottom: 10px;
+  z-index: 5;
+  width: 28px;
+  height: 28px;
+  background: rgba(16, 20, 29, 0.85);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.fit-btn:hover { color: var(--text); border-color: var(--accent); }
 
 .sidecar {
   width: 340px;

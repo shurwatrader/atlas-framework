@@ -36,7 +36,7 @@ export function createAtlasChart(container, flowContainer) {
       horzLines: { color: 'rgba(139,147,167,0.08)' },
     },
     timeScale: { timeVisible: true, secondsVisible: false, borderColor: 'rgba(139,147,167,0.2)' },
-    rightPriceScale: { borderColor: 'rgba(139,147,167,0.2)' },
+    rightPriceScale: { borderColor: 'rgba(139,147,167,0.2)', scaleMargins: { top: 0.12, bottom: 0.12 } },
     crosshair: { mode: 0 },
   };
 
@@ -51,40 +51,42 @@ export function createAtlasChart(container, flowContainer) {
     orbMode: 'net',
     orbMinFrac: 0,
     endTime: null,       // right edge levels/orbs extend to in live view
+    contentEnd: null,    // last bar time with GEX coverage (orbs/levels)
     truncTime: null,     // replay playhead (null = live view)
-    freezeScale: false,  // during playback: pin the price axis (no rescale)
-    frozen: null,        // { min, max } the price axis is pinned to
-    userRange: null,     // during playback: the bar-index window to hold
-    applying: false,     // guard: our own setData, not a user zoom/pan
   };
 
   // Orb layer FIRST so candles (created after) always paint on top of the
-  // pressure field — orbs glow behind price, never over it. Fixed pool of
+  // pressure field — orbs glow behind price, never over it. Fixed pools of
   // series, reused across loads (creation order is z-order in v4).
-  const ORB_POOL = 24;
-  const orbSeries = [];
-  for (let i = 0; i < ORB_POOL; i++) {
-    orbSeries.push(chart.addLineSeries({
-      color: 'rgba(0,0,0,0)', // orbs only — no connecting line
-      lastValueVisible: false,
-      priceLineVisible: false,
-      crosshairMarkerVisible: false,
-      autoscaleInfoProvider: () => null, // never stretch the price axis
-    }));
-  }
+  //
+  // Each strike draws TWO stacked markers for a soft glowing look (Atlas Orbs
+  // V2): a wide, faint HALO underneath a smaller, brighter CORE. Two markers
+  // can't share a time slot on one series, so we keep two parallel pools —
+  // halo created first (drawn lowest), core above it, both under the candles.
+  const ORB_POOL = 12; // strikes drawn at once (count control caps at 10)
+  const newOrbSeries = () => chart.addLineSeries({
+    color: 'rgba(0,0,0,0)', // orbs only — no connecting line
+    lastValueVisible: false,
+    priceLineVisible: false,
+    crosshairMarkerVisible: false,
+    // Orbs DO drive the price axis: we show the heaviest strikes regardless of
+    // distance from price, so the axis must stretch to keep them in view. The
+    // strike-count control is the lever — fewer strikes = tighter range =
+    // bigger candles. (Default autoscale uses each orb's strike as its value.)
+  });
+  const orbHalo = [];
+  const orbCore = [];
+  for (let i = 0; i < ORB_POOL; i++) orbHalo.push(newOrbSeries());
+  for (let i = 0; i < ORB_POOL; i++) orbCore.push(newOrbSeries());
 
   const candles = chart.addCandlestickSeries({
     upColor: '#d1d4dc', downColor: '#5d6b8a',
     wickUpColor: '#d1d4dc', wickDownColor: '#5d6b8a',
     borderVisible: false,
-    // During playback pin the price axis to cache.frozen (the range of the
-    // bars currently in view) so revealing candles can't rescale it. When
-    // you zoom/pan mid-play, cache.frozen is recomputed for the new window
-    // (see refreezePriceToView). Paused: defer to normal per-view autoscale.
-    autoscaleInfoProvider: (orig) =>
-      cache.freezeScale && cache.frozen
-        ? { priceRange: { minValue: cache.frozen.min, maxValue: cache.frozen.max } }
-        : orig(),
+    // Only the candles drive the price axis; it autoscales to the visible
+    // candles. Future bars are whitespace (no OHLC), so they don't feed
+    // autoscale — and because the bar count never changes, the horizontal
+    // view stays exactly where the user leaves it during playback.
   });
 
   const levelSeries = {};
@@ -116,52 +118,44 @@ export function createAtlasChart(container, flowContainer) {
     if (r) chart.timeScale().setVisibleLogicalRange(r);
   });
 
-  // While playing, a user zoom/pan fires this — adopt the new window as the
-  // one to hold and refit the frozen price range to it, so candles fill the
-  // zoom. Our own setData (cache.applying) is skipped, so steady playback
-  // holds the stored window and stays rock-still.
-  chart.timeScale().subscribeVisibleLogicalRangeChange(() => {
-    if (!cache.freezeScale || cache.applying) return;
-    cache.userRange = chart.timeScale().getVisibleLogicalRange();
-    refreezePriceToView();
-  });
-
-  // Pin the price axis to the price range of the bars in the current view
-  // (future bars included — they'll reveal, and the axis mustn't jump then).
-  function refreezePriceToView() {
-    const lr = chart.timeScale().getVisibleLogicalRange();
-    if (!lr || !cache.bars.length) return;
-    const lo = Math.max(0, Math.floor(lr.from));
-    const hi = Math.min(cache.bars.length - 1, Math.ceil(lr.to));
-    let mn = Infinity, mx = -Infinity;
-    for (let i = lo; i <= hi; i++) {
-      const b = cache.bars[i];
-      if (b.l < mn) mn = b.l;
-      if (b.h > mx) mx = b.h;
-    }
-    if (mn < mx) {
-      const pad = (mx - mn) * 0.08;
-      cache.frozen = { min: mn - pad, max: mx + pad };
-      chart.priceScale('right').applyOptions({ autoScale: true }); // provider re-reads
-    }
-  }
-
   const upTo = (points, t) =>
     t == null ? points : points.filter((p) => p.time <= t);
+
+  // Bar index at or before time t (binary search); -1 if t predates bar 0.
+  function indexAtOrBefore(t) {
+    const bars = cache.bars;
+    if (!bars.length || t < bars[0].t) return -1;
+    let lo = 0, hi = bars.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (bars[mid].t <= t) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+  }
 
   // The right edge levels/orbs extend to must also be a real bar time —
   // any other timestamp would inject an empty slot into the time axis.
   function snappedEdge() {
     const t = cache.truncTime ?? cache.endTime;
     if (t == null) return null;
-    const bars = cache.bars;
-    if (!bars.length || t < bars[0].t) return null;
-    let lo = 0, hi = bars.length - 1;
-    while (lo < hi) {
-      const mid = (lo + hi + 1) >> 1;
-      if (bars[mid].t <= t) lo = mid; else hi = mid - 1;
-    }
-    return bars[lo].t;
+    const idx = indexAtOrBefore(t);
+    return idx < 0 ? null : cache.bars[idx].t;
+  }
+
+  // Frame an n-wide window ending at the playhead (replay) / GEX edge / last
+  // bar — the "optimal view": legible candles, not the whole session squeezed
+  // to fit. Early in a replay (no history yet) the window anchors at the start
+  // so candles reveal into a legibly-sized view rather than a whole-session fit.
+  function frameRecentImpl(n = 130) {
+    const len = cache.bars.length;
+    if (!len) return;
+    let end = len - 1;
+    const anchor = cache.truncTime ?? cache.contentEnd;
+    if (anchor != null) end = Math.max(0, indexAtOrBefore(anchor));
+    let from = end - n + 1;
+    let to = end;
+    if (from < 0) { from = 0; to = Math.min(len - 1, n - 1); } // start-anchored
+    chart.timeScale().setVisibleLogicalRange({ from: from - 0.5, to: to + 0.5 });
   }
 
   function renderBars() {
@@ -215,39 +209,53 @@ export function createAtlasChart(container, flowContainer) {
     const palette = cache.orbMode === 'delta'
       ? { pos: '102,187,106', neg: '239,83,80' }
       : { pos: '38,166,154', neg: '126,87,194' }; // heatmap cell hues
-    // Fixed pool of series (created under the candles at init); slots beyond
+    // Fixed pools of series (created under the candles at init); slots beyond
     // the current orb set are cleared, never removed.
-    const orbs = cache.orbs.slice(0, orbSeries.length);
-    for (let i = orbs.length; i < orbSeries.length; i++) {
-      orbSeries[i].setData([]);
-      orbSeries[i].setMarkers([]);
+    const orbs = cache.orbs.slice(0, orbCore.length);
+    for (let i = orbs.length; i < orbCore.length; i++) {
+      orbHalo[i].setData([]); orbHalo[i].setMarkers([]);
+      orbCore[i].setData([]); orbCore[i].setMarkers([]);
     }
 
     const maxStrength = Math.max(1, ...orbs.flatMap((o) => o.points.map((p) => p.strength)));
     const edge = snappedEdge();
     orbs.forEach(({ strike, points }, i) => {
       const visible = upTo(points, cache.truncTime);
-      const series = orbSeries[i];
-      series.applyOptions({ visible: orbsVisible });
+      const halo = orbHalo[i], core = orbCore[i];
+      halo.applyOptions({ visible: orbsVisible });
+      core.applyOptions({ visible: orbsVisible });
+
       const data = visible.map(({ time }) => ({ time, value: strike }));
       if (data.length && edge && edge > data[data.length - 1].time) {
         data.push({ time: edge, value: strike });
       }
-      series.setData(data);
-      series.setMarkers(
-        visible
-          .filter((p) => p.strength > 0 && p.strength >= cache.orbMinFrac * maxStrength)
-          .map((p) => {
-            const t = Math.sqrt(p.strength / maxStrength);
-            return {
-              time: p.time,
-              position: 'inBar',
-              shape: 'circle',
-              color: `rgba(${p.sign >= 0 ? palette.pos : palette.neg},${(0.10 + 0.85 * t).toFixed(3)})`,
-              size: 0.3 + 1.2 * t,
-            };
-          })
+      halo.setData(data);
+      core.setData(data);
+
+      // Strength → marker size/opacity. Gentler than sqrt (pow 0.6) so
+      // mid-strength nodes stay legible; the strongest node in a chain is the
+      // largest/brightest. Each point paints a faint wide halo + a tight core.
+      const drawn = visible.filter(
+        (p) => p.strength > 0 && p.strength >= cache.orbMinFrac * maxStrength
       );
+      const rgb = (p) => (p.sign >= 0 ? palette.pos : palette.neg);
+      halo.setMarkers(drawn.map((p) => {
+        const t = Math.pow(p.strength / maxStrength, 0.6);
+        const core = 0.5 + 2.0 * t;
+        return {
+          time: p.time, position: 'inBar', shape: 'circle',
+          color: `rgba(${rgb(p)},${(0.06 + 0.16 * t).toFixed(3)})`,
+          size: core * 1.9,
+        };
+      }));
+      core.setMarkers(drawn.map((p) => {
+        const t = Math.pow(p.strength / maxStrength, 0.6);
+        return {
+          time: p.time, position: 'inBar', shape: 'circle',
+          color: `rgba(${rgb(p)},${(0.25 + 0.70 * t).toFixed(3)})`,
+          size: 0.5 + 2.0 * t,
+        };
+      }));
     });
   }
 
@@ -279,8 +287,12 @@ export function createAtlasChart(container, flowContainer) {
 
     toggleStrikeOrbs(visible) {
       orbsVisible = visible;
-      for (const s of orbSeries) s.applyOptions({ visible });
+      for (const s of orbHalo) s.applyOptions({ visible });
+      for (const s of orbCore) s.applyOptions({ visible });
     },
+
+    /** The last bar time covered by GEX data (orbs/levels); used by frameRecent. */
+    setContentEnd(t) { cache.contentEnd = t; },
 
     /**
      * Move the replay playhead: everything re-renders truncated to time <= t.
@@ -291,44 +303,23 @@ export function createAtlasChart(container, flowContainer) {
     setReplayTime(t) {
       if (cache.truncTime === t) return;
       cache.truncTime = t;
-      // During playback, re-assert the stored window (updated only by user
-      // gestures) after setData — which otherwise auto-scrolls to the last
-      // real bar. Re-applying the same stored value each tick is idempotent,
-      // so there's no compounding drift. The applying guard keeps this from
-      // being mistaken for a user zoom.
-      cache.applying = true;
+      // Future bars are whitespace, so the time-axis extent is constant and
+      // setData never auto-scrolls. The view stays exactly where the user left
+      // it — free pan/zoom during playback with no snap-back. The playhead may
+      // scroll out of view; the ⤢ fit button jumps back to it on demand.
       renderBars();
       renderLevels();
       renderOrbField();
-      if (cache.freezeScale && cache.userRange) {
-        chart.timeScale().setVisibleLogicalRange(cache.userRange);
-      }
-      cache.applying = false;
-    },
-
-    /**
-     * Playback view mode. On start: frame the whole session once, then pin
-     * the price axis to what's in view — but the user stays free to zoom/pan
-     * (the frame follows their gesture and refits price to it). Nothing moves
-     * on its own. On stop: hand the axes back to normal adaptive autoscale.
-     */
-    freezeScale(on) {
-      if (on && cache.bars.length) {
-        cache.freezeScale = true;
-        cache.userRange = { from: -1, to: cache.bars.length }; // whole session
-        cache.applying = true;
-        chart.timeScale().setVisibleLogicalRange(cache.userRange);
-        cache.applying = false;
-        refreezePriceToView();
-      } else {
-        cache.freezeScale = false;
-        cache.frozen = null;
-        cache.userRange = null;
-        chart.priceScale('right').applyOptions({ autoScale: true });
-      }
     },
 
     fit() { chart.timeScale().fitContent(); },
+
+    /**
+     * Frame the n bars ending at the playhead — the "optimal view": legible
+     * candles instead of the whole session squeezed to fit. Anchors to the
+     * replay playhead, else the GEX coverage edge, else the last bar.
+     */
+    frameRecent(n = 130) { frameRecentImpl(n); },
     zoom(from, to) { chart.timeScale().setVisibleRange({ from, to }); },
     styles: LEVEL_STYLES,
   };
