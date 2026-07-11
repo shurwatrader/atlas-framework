@@ -3,14 +3,17 @@
  * replay transport (ported from gex-replay-basic: same controls, same keys).
  */
 import { replayAdapter, listSeries } from './adapter.js';
-import { buildLevelSeries, buildStrikeOrbs, parseValue, snapToBar } from './levels.js';
+import { buildLevelSeries, buildStrikeOrbs, parseValue, snapToBar, includeExpiry } from './levels.js';
 import { createAtlasChart } from './chart.js';
 
 const $ = (sel) => document.querySelector(sel);
 
-// Bars framed in the default "optimal" view — ≈ one day of 2-min bars. The orb
-// field and the fit button both key off this so candles read at a legible size.
-const RECENT_BARS = 130;
+// Bars framed in the default "optimal" view, about one day of 10-min bars. The
+// fit button keys off this so candles read at a legible size around spot.
+const RECENT_BARS = 40;
+
+// Sort key for "MM-DD-YYYY" expiry dates (reorder to YYYY-MM-DD for lexical sort).
+const expKey = (d) => d.replace(/(\d\d)-(\d\d)-(\d{4})/, '$3-$1-$2');
 
 const state = {
   frames: [],
@@ -20,6 +23,8 @@ const state = {
   lastTime: null,      // right edge of the bar series (secs)
   orbMode: 'net',
   orbCount: 6,          // how many of the heaviest strikes draw orbs (1–10)
+  expiries: null,       // Set of selected expiry date strings (null/empty = all)
+  allExpiries: [],      // union of expiry dates across the loaded ticker's frames
   symbol: null,
   derivedFrom: null,
   note: null,
@@ -36,11 +41,49 @@ function renderOrbs(atlas) {
       range: state.orbRange,
       snapTo: state.barTimes,
       rankFrom: state.orbRankFrom,
+      expiries: state.expiries,
     }),
     state.lastTime,
     state.orbMode,
     0 // strength clamp retired — the count control decides what shows
   );
+}
+
+// Rebuild the derived layers (levels + orbs) from the current frames and expiry
+// selection. Cheap enough to call on any expiry-checkbox change.
+function rebuildDerived(atlas) {
+  const { levels } = buildLevelSeries(state.frames, {
+    snapTo: state.barTimes,
+    expiries: state.expiries,
+  });
+  atlas.setLevels(levels, state.lastTime);
+  renderOrbs(atlas);
+}
+
+// Expiry multi-select: one checkbox per available expiration date (all checked
+// by default). Selection drives the walls, GEX0, orbs, and the heatmap columns.
+function buildExpiryPicker(atlas) {
+  const host = $('#expiryPicker');
+  if (!host) return;
+  const dates = state.allExpiries;
+  host.innerHTML = dates.length ? '<span class="exp-label">Exp</span>' : '';
+  for (const d of dates) {
+    const lab = document.createElement('label');
+    lab.className = 'exp-item';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !state.expiries || state.expiries.has(d);
+    cb.addEventListener('change', () => {
+      if (!state.expiries) state.expiries = new Set(state.allExpiries);
+      if (cb.checked) state.expiries.add(d); else state.expiries.delete(d);
+      rebuildDerived(atlas);
+      const cur = state.frames[state.frameIndex];
+      if (cur) renderHeatmap(cur);
+    });
+    lab.appendChild(cb);
+    lab.appendChild(document.createTextNode(d.slice(0, 5))); // MM-DD
+    host.appendChild(lab);
+  }
 }
 
 // ---------- trading day + snapshot clock (same display as gex-replay-basic:
@@ -122,7 +165,12 @@ async function loadSeries(atlas, symbol) {
   state.lastTime = bars[bars.length - 1]?.t;
   // Every drawn point must sit on a real bar time — see levels.snapToBar.
   state.barTimes = bars.map((b) => b.t);
-  const { levels } = buildLevelSeries(frames, { snapTo: state.barTimes });
+
+  // Expiry picker resets to "all selected" on each ticker (the set of dates
+  // differs per symbol, and even drifts frame to frame within one symbol).
+  state.allExpiries = [...new Set(frames.flatMap((f) => f.expiries || []))]
+    .sort((a, b) => expKey(a).localeCompare(expKey(b)));
+  state.expiries = new Set(state.allExpiries);
 
   // The GEX scrape (levels + orbs) ends at the last snapshot, but the price
   // bars run hours later (after-hours tape with no GEX). Anchor the default
@@ -136,9 +184,8 @@ async function loadSeries(atlas, symbol) {
   // Show the heaviest strikes by |net GEX| regardless of distance from price
   // (Atlas-style), positive or negative — no price-band filter. Rank by
   // strength within the recent GEX window so the *current* structure wins the
-  // budget, then the chart fits whatever strikes are shown (orbs drive the
-  // price axis). Fewer strikes (the count control) = tighter range, bigger
-  // candles; more strikes reach further out and compress the candles.
+  // budget. The candles drive the price axis, so far strikes clip off-screen
+  // until you drag the price axis out; the count control sets how many draw.
   let endIdx = bars.length - 1;
   for (let i = 0; i < bars.length && bars[i].t <= state.gexEndTime; i++) endIdx = i;
   const recent = bars.slice(Math.max(0, endIdx - RECENT_BARS + 1), endIdx + 1);
@@ -146,10 +193,10 @@ async function loadSeries(atlas, symbol) {
   state.orbRankFrom = recent[0]?.t ?? null; // rank strikes by recent activity
 
   atlas.setBars(bars);
-  atlas.setLevels(levels, state.lastTime);
-  renderOrbs(atlas);
-  atlas.setContentEnd(state.gexEndTime); // where GEX coverage ends
-  atlas.frameRecent(RECENT_BARS); // legible recent window, anchored to GEX coverage
+  rebuildDerived(atlas);                  // levels + orbs from the current expiries
+  atlas.setContentEnd(state.gexEndTime);  // where GEX coverage ends
+  atlas.frameRecent(RECENT_BARS);         // legible recent window, anchored to GEX coverage
+  buildExpiryPicker(atlas);               // rebuild the checkboxes for this ticker
 
   $('#symbol').textContent = symbol + (derivedFrom ? ` (derived ← ${derivedFrom})` : '');
   const firstDay = frames[0]?.tradingDay ?? '';
@@ -197,7 +244,7 @@ async function main() {
   // Strike-orbs toggle (the per-strike heaviness field)
   const orbChip = document.createElement('button');
   orbChip.className = 'chip on';
-  orbChip.innerHTML = '<span class="dot" style="background:rgba(38,166,154,0.9)"></span>Strike Orbs';
+  orbChip.innerHTML = '<span class="dot" style="background:rgba(38,152,134,0.9)"></span>Strike Orbs';
   orbChip.addEventListener('click', () =>
     atlas.toggleStrikeOrbs(orbChip.classList.toggle('on'))
   );
@@ -260,7 +307,7 @@ async function main() {
 
   // Optimal-view button (bottom-right of the chart): reframe to the legible
   // recent window at any time, playing or paused.
-  $('#fitBtn').onclick = () => atlas.frameRecent(130);
+  $('#fitBtn').onclick = () => atlas.frameRecent(RECENT_BARS);
 
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
@@ -280,29 +327,56 @@ async function main() {
   );
 }
 
+// gex-replay-basic's diverging scale (styleFor): purple negatives, through blue
+// and a dark neutral, to teal and yellow positives. Interpolated linearly
+// between adjacent stops; sqrt-scaled against SEPARATE per-frame pos/neg maxes.
+const HEAT_STOPS = [
+  [-1, 150, 60, 170], [-0.5, 70, 90, 180], [0, 28, 45, 60],
+  [0.5, 38, 152, 134], [1, 245, 215, 60],
+];
+function heatColor(v, posMax, negMax) {
+  if (!v) return { bg: 'rgb(24,30,38)', fg: '#5f656e' }; // parent's empty cell
+  let t = v > 0 ? Math.sqrt(v / posMax) : -Math.sqrt(-v / negMax);
+  t = Math.max(-1, Math.min(1, t));
+  let a = HEAT_STOPS[0], b = HEAT_STOPS[HEAT_STOPS.length - 1];
+  for (let i = 1; i < HEAT_STOPS.length; i++) {
+    if (t <= HEAT_STOPS[i][0]) { a = HEAT_STOPS[i - 1]; b = HEAT_STOPS[i]; break; }
+  }
+  const span = b[0] - a[0];
+  const f = span === 0 ? 0 : (t - a[0]) / span;
+  const ch = (j) => Math.round(a[j] + f * (b[j] - a[j]));
+  return { bg: `rgb(${ch(1)},${ch(2)},${ch(3)})`, fg: '#e6e9ef' };
+}
+
 /**
- * Heatmap sidecar: the strike × expiry board at the playhead frame —
- * gex-replay-basic's grid, docked beside the chart and scrubbing in sync.
- * Diverging color scale (purple = negative GEX, teal→green = positive),
- * sqrt-compressed, anchored to the frame's own min/max. ~40 heaviest strikes.
+ * Heatmap sidecar: the strike × expiry board at the playhead frame, colored to
+ * match gex-replay-basic's grid and scrubbing in sync. Columns are limited to
+ * the selected expiries; ~40 heaviest strikes shown.
  */
 function renderHeatmap(frame, maxRows = 40) {
   const el = $('#heatmap');
   if (!frame) { el.innerHTML = ''; return; }
   const spot = parseFloat(frame.price);
+  const exp = frame.expiries || [];
+  // Selected expiry columns (indices into each row's parallel values array).
+  const cols = exp.map((e, i) => ({ e, i })).filter(({ i }) => includeExpiry(exp, i, state.expiries));
+  if (!cols.length) { el.innerHTML = ''; $('#sidecar-time').textContent = fmtSnapET(frame.capturedAt); return; }
 
   const rows = frame.rows
-    .map((r) => ({ strike: r.strike, vals: r.values.map((v) => parseValue(v.text)) }))
-    .map((r) => ({ ...r, peak: Math.max(...r.vals.map(Math.abs)) }))
+    .map((r) => ({ strike: r.strike, vals: cols.map(({ i }) => parseValue(r.values[i]?.text)) }))
+    .map((r) => ({ ...r, peak: Math.max(0, ...r.vals.map(Math.abs)) }))
     .sort((a, b) => b.peak - a.peak)
     .slice(0, maxRows)
     .sort((a, b) => b.strike - a.strike);
 
-  const maxAbs = Math.max(1, ...rows.map((r) => r.peak));
-  const color = (v) => {
-    const t = Math.sqrt(Math.abs(v) / maxAbs);
-    return v < 0 ? `rgba(126,87,194,${0.12 + 0.75 * t})` : `rgba(38,166,154,${0.10 + 0.75 * t})`;
-  };
+  // Separate positive / negative maxes across the shown cells (the parent's
+  // per-frame scale). The heaviest of each sign is in the top rows.
+  let posMax = 1, negMax = 1;
+  for (const r of rows) for (const v of r.vals) {
+    if (v > posMax) posMax = v;
+    if (-v > negMax) negMax = -v;
+  }
+
   const fmt = (v) => {
     const a = Math.abs(v);
     if (a >= 1e9) return (v / 1e9).toFixed(1) + 'B';
@@ -311,19 +385,20 @@ function renderHeatmap(frame, maxRows = 40) {
     return v ? v.toFixed(0) : '·';
   };
 
-  el.style.gridTemplateColumns = `60px repeat(${frame.expiries.length}, 1fr)`;
+  el.style.gridTemplateColumns = `60px repeat(${cols.length}, 1fr)`;
   const spotStrike = rows.reduce(
     (best, r) => (Math.abs(r.strike - spot) < Math.abs(best - spot) ? r.strike : best),
     rows[0]?.strike ?? 0
   );
 
   let html = '<div class="hm-head hm-strike">strike</div>' +
-    frame.expiries.map((e) => `<div class="hm-head">${e.slice(0, 5)}</div>`).join('');
+    cols.map(({ e }) => `<div class="hm-head">${e.slice(0, 5)}</div>`).join('');
   for (const r of rows) {
     html += `<div class="hm-cell hm-strike${r.strike === spotStrike ? ' hm-spot' : ''}">${r.strike}</div>`;
-    html += r.vals
-      .map((v) => `<div class="hm-cell" style="background:${color(v)}">${fmt(v)}</div>`)
-      .join('');
+    html += r.vals.map((v) => {
+      const c = heatColor(v, posMax, negMax);
+      return `<div class="hm-cell" style="background:${c.bg};color:${c.fg}">${fmt(v)}</div>`;
+    }).join('');
   }
   el.innerHTML = html;
   $('#sidecar-time').textContent = fmtSnapET(frame.capturedAt);

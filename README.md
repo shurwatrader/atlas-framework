@@ -64,11 +64,10 @@ Concretely, "built on top of" means:
 - **Ticker switcher.** MU, SPY, SPX (derived), TSLA, straight from the
   gex-replay-basic manifest, each pairing real bars with that ticker's scraped
   GEX-OI board.
-- **Candlestick chart.** 2-minute OHLCV through the day session, matching the
-  snapshot cadence (the overnight stretch is 5m; there's no overnight 1m feed in
-  the demo). All sessions shown, overnight included. On load the chart frames the
-  recent GEX-covered window so the candles read at a legible size, rather than the
-  whole two-day session squeezed to fit.
+- **Candlestick chart.** 10-minute OHLCV (rolled up from the 2m day / 5m overnight
+  bars), matching where the GEX board is headed. All sessions shown, overnight
+  included. On load the chart frames the recent GEX-covered window so the candles
+  read at a legible size, rather than the whole two-day session squeezed to fit.
 - **Replay transport.** Scrub or play the session and watch price, levels, orbs,
   and the heatmap advance together, frame by frame. While playing, the view stays
   where you leave it, so you can pan and zoom freely without it snapping back. The
@@ -79,14 +78,18 @@ Concretely, "built on top of" means:
   strength and colored by sign (teal for positive GEX, purple for negative). Those
   are the same values and hues that color the board's cells, so an orb chain and
   its board row read as one thing. Each orb is a soft glowing dot: a faint wide
-  halo under a brighter core. The orbs drive the price axis, so the heaviest
-  strikes stay in view even when they sit well above or below spot. Toggle the
-  field off and the axis snaps back to hug the candles. Skylit's Orbs encode
+  halo under a brighter core. The candles drive the price axis, so the view stays
+  focused on price action; heavy strikes that sit far from spot clip off the top or
+  bottom until you drag the price axis out to reach them. Skylit's Orbs encode
   strength as brightness and size; same idea.
 - **Strike count.** A slider (1 to 10) sets how many of the heaviest strikes draw
-  orbs. It doubles as the candle-size lever: fewer strikes means a tighter price
-  range and bigger candles, while more strikes reach out toward the wings and
-  compress the candles.
+  orbs, ranked by their strength in the recent window. Far-from-spot strikes still
+  get an orb, they just sit off-screen until you widen the price axis.
+- **Expiry picker.** Checkboxes for each available expiration date (all on by
+  default). Uncheck dates to feed only the expiries you care about into the walls,
+  GEX0, orbs, and the heatmap columns. The date set is rebuilt per ticker (SPY
+  dailies, MU weeklies) and matched by date, since the board's expiries shift as
+  near contracts roll off.
 - **Δ Flow mode.** Flips the orb field from *where structure sits* (net) to *where
   money is moving* (change versus the previous snapshot: building green, draining
   red, gex-replay's "Movers" drawn on the price chart). The two modes rank strikes
@@ -94,8 +97,11 @@ Concretely, "built on top of" means:
   net-GEX snapshots, Δ shows net change per interval. It can't separate "new money
   in" from opposite positioning offsetting it. True attribution needs the call and
   put flow split (DATA_CONTRACT §4).
-- **Heatmap sidecar.** The gex-replay-basic board at the playhead frame, docked
-  beside the chart (on by default, toggleable from the chip bar).
+- **Heatmap sidecar.** The gex-replay-basic board at the playhead frame, colored
+  with the same diverging scale it uses (purple negatives through a dark neutral to
+  teal and yellow positives, scaled per frame), docked beside the chart (on by
+  default, toggleable from the chip bar). It shows the columns you've checked in the
+  expiry picker.
 - **Dealer levels as indicators.** Stepped dotted lines, one point per GEX
   snapshot: a wall or king simply re-positions every ~2 min if it moves (no
   markers on the lines, since pressure and strength live in the orb field):
@@ -158,9 +164,9 @@ differences remain, beyond raw data availability:
 
 1. **Expiry aggregation.** Skylit's orbs are *organized by contract expiration*
    ("the same strike can look different depending on the expiration selected").
-   This demo sums GEX across visible expiries per strike. The per-expiry values
-   are already in the data, so an expiration selector is a build task, not a data
-   ask.
+   The expiry picker here lets you sum any subset of expirations, so you can
+   isolate the near date. It still sums the checked expiries into one number per
+   strike rather than drawing a separate orb layer per expiration.
 2. **Rendering.** Orbs here are Lightweight Charts series markers: a faint halo
    marker stacked under a brighter core, with strength mapped to size and opacity.
    That reads as a soft glow, but marker sizes are quantized and each strike costs
@@ -191,11 +197,11 @@ one place." How this framework maps onto their published feature set:
 | Skylit Atlas feature | Status here | Notes |
 |---|---|---|
 | **Orbs Classic** (strength = brightness) | done (lite) | per-strike orb field tied to the board's values: size and opacity encode node strength, normalized per session; levels themselves are clean indicator lines |
-| **Orbs V2** (Min/Max Clamp size/opacity controls) | strike-count slider | instead of a strength clamp, a 1-to-10 slider picks how many of the heaviest strikes draw (top-N by net-GEX magnitude); it also sets how far the field reaches from spot |
+| **Orbs V2** (Min/Max Clamp size/opacity controls) | strike-count slider | instead of a strength clamp, a 1-to-10 slider picks how many of the heaviest strikes draw (top-N by net-GEX magnitude) |
 | **Scroll as Replay** (only data known at that time) | done | scrub to 10:14 and candles, levels, orbs, and the board show exactly what was known at 10:14 |
 | **Sidecars** (heatmap / Trinity cross-market) | heatmap sidecar | the parent repo's strike × expiry board at the playhead, docked beside the chart; Trinity (cross-market) would be the same panel × 3 symbols |
 | **Exposure views: GEX / VEX / GEX+VEX / Derived** | GEX-OI only | pure data availability; the toggle architecture is in place |
-| **Expiration selection** (per-expiry levels) | roadmap, see fidelity note 1 | the scrape already carries per-expiry values; levels.js currently sums across expiries. Use case: 0DTE walls behave differently from monthly OI walls, so a trader sizing an intraday play needs the near expiry isolated |
+| **Expiration selection** (per-expiry levels) | done (multi-select) | checkboxes per expiration date drive the walls, GEX0, orbs, and heatmap columns; matched by date since the board's expiries shift frame to frame. Use case: 0DTE walls behave differently from monthly OI walls, so a trader sizing an intraday play can isolate the near expiry |
 | **Flowseeker pane** (options volume under price) | placeholder | needs a real flow feed (DATA_CONTRACT §4) |
 | **Dark pool levels** | not started | needs a dark-pool prints source (DATA_CONTRACT §6) |
 | **Derived Orbs** (ES borrows SPY/SPXW, NQ borrows QQQ, adjusted for "the wiggle") | price side demoed (SPX ← SPY bars) | the level side is the same ratio transform in the adapter. Use case: futures traders get options structure their contract doesn't have |

@@ -45,9 +45,21 @@ export function parseValue(text) {
   return parseFloat(m[1]) * mult;
 }
 
-/** Sum a row's GEX across all expiries. */
-function rowTotal(row) {
-  return row.values.reduce((s, v) => s + parseValue(v.text), 0);
+/**
+ * Whether expiry column i should be counted. `selected` is a Set of expiry
+ * date strings (or null/empty = all). `expiries` is the frame's parallel date
+ * array. Expiry indices shift frame to frame, so selection is matched by date.
+ */
+export function includeExpiry(expiries, i, selected) {
+  return !selected || selected.size === 0 || (!!expiries && selected.has(expiries[i]));
+}
+
+/** Sum a row's GEX across the selected expiries (all by default). */
+function rowTotal(row, expiries, selected) {
+  return row.values.reduce(
+    (s, v, i) => (includeExpiry(expiries, i, selected) ? s + parseValue(v.text) : s),
+    0
+  );
 }
 
 /**
@@ -55,19 +67,24 @@ function rowTotal(row) {
  * @param {object} frame — one snapshot: { rows, expiries, price, netExposure, capturedAt }
  * @returns {object} { time, spot, callWall, putWall, oiKing, volKing, gex0, netExposure }
  */
-export function deriveLevels(frame) {
+export function deriveLevels(frame, { expiries = null } = {}) {
   const spot = parseFloat(frame.price);
+  const exp = frame.expiries;
   const totals = frame.rows
-    .map((row) => ({ strike: row.strike, total: rowTotal(row), row }))
+    .map((row) => ({ strike: row.strike, total: rowTotal(row, exp, expiries), row }))
     .sort((a, b) => a.strike - b.strike);
+
+  // King flags live per expiry cell — only honor them in a selected column.
+  const kingIn = (row, flag) =>
+    row.values.some((v, i) => v[flag] && includeExpiry(exp, i, expiries));
 
   let callWall = null, putWall = null, oiKing = null, volKing = null;
   let maxPos = 0, minNeg = 0, oiKingGex = 0, volKingGex = 0;
   for (const t of totals) {
     if (t.total > maxPos) { maxPos = t.total; callWall = t.strike; }
     if (t.total < minNeg) { minNeg = t.total; putWall = t.strike; }
-    if (t.row.values.some((v) => v.oiKing)) { oiKing = t.strike; oiKingGex = Math.abs(t.total); }
-    if (t.row.values.some((v) => v.volKing)) { volKing = t.strike; volKingGex = Math.abs(t.total); }
+    if (kingIn(t.row, 'oiKing')) { oiKing = t.strike; oiKingGex = Math.abs(t.total); }
+    if (kingIn(t.row, 'volKing')) { volKing = t.strike; volKingGex = Math.abs(t.total); }
   }
 
   return {
@@ -139,13 +156,13 @@ export function findGexZero(totals, spot) {
  *
  * @returns [{ strike, points: [{ time, strength, sign }] }]
  */
-export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range = null, snapTo = null, rankFrom = null } = {}) {
+export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range = null, snapTo = null, rankFrom = null, expiries = null } = {}) {
   const perFrame = frames.map((frame) => {
     const raw = Math.floor(Date.parse(frame.capturedAt) / 1000);
     const time = snapTo ? snapToBar(raw, snapTo) : raw;
     const totals = new Map();
     for (const row of frame.rows) {
-      totals.set(row.strike, row.values.reduce((s, v) => s + parseValue(v.text), 0));
+      totals.set(row.strike, rowTotal(row, frame.expiries, expiries));
     }
     return { time, totals };
   });
@@ -197,17 +214,17 @@ export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range =
  * ready to hand to the chart as stepped lines.
  * @returns {object} map of levelKey -> [{ time, value }]
  */
-export function buildLevelSeries(frames, { snapTo = null } = {}) {
+export function buildLevelSeries(frames, { snapTo = null, expiries = null } = {}) {
   const keys = ['callWall', 'putWall', 'oiKing', 'volKing', 'gex0'];
   const series = Object.fromEntries(keys.map((k) => [k, []]));
   const net = [];
   const push = (arr, p) => {
-    // several frames snapping to one bar → last one wins
+    // several frames snapping to one bar, last one wins
     if (arr.length && arr[arr.length - 1].time === p.time) arr[arr.length - 1] = p;
     else arr.push(p);
   };
   for (const frame of frames) {
-    const lv = deriveLevels(frame);
+    const lv = deriveLevels(frame, { expiries });
     const time = snapTo ? snapToBar(lv.time, snapTo) : lv.time;
     if (time == null) continue; // frame predates the bar series
     for (const k of keys) {

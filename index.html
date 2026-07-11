@@ -17,9 +17,9 @@
       <span id="net" class="net"></span>
     </div>
     <nav class="timeframes">
-      <button class="tf active">2m</button>
-      <button class="tf">5m</button>
+      <button class="tf active">10m</button>
       <button class="tf">15m</button>
+      <button class="tf">30m</button>
       <button class="tf">1H</button>
       <button class="tf">4H</button>
       <button class="tf">1D</button>
@@ -36,7 +36,7 @@
     </div>
   </header>
 
-  <div id="toggles" class="toggles"></div>
+  <div id="toggles" class="toggles"><span id="expiryPicker" class="expiries"></span></div>
 
   <main>
     <div class="chart-row">
@@ -68,8 +68,8 @@
     <div class="ctl-right">
       <label class="speed">Step
         <select id="stepSelect">
-          <option value="1" selected>2m</option>
-          <option value="5">10m</option>
+          <option value="1">2m</option>
+          <option value="5" selected>10m</option>
           <option value="15">30m</option>
           <option value="30">1h</option>
         </select>

@@ -65,14 +65,15 @@ export function createAtlasChart(container, flowContainer) {
   // halo created first (drawn lowest), core above it, both under the candles.
   const ORB_POOL = 12; // strikes drawn at once (count control caps at 10)
   const newOrbSeries = () => chart.addLineSeries({
-    color: 'rgba(0,0,0,0)', // orbs only — no connecting line
+    color: 'rgba(0,0,0,0)', // orbs only, no connecting line
     lastValueVisible: false,
     priceLineVisible: false,
     crosshairMarkerVisible: false,
-    // Orbs DO drive the price axis: we show the heaviest strikes regardless of
-    // distance from price, so the axis must stretch to keep them in view. The
-    // strike-count control is the lever — fewer strikes = tighter range =
-    // bigger candles. (Default autoscale uses each orb's strike as its value.)
+    // Orbs never stretch the price axis. The candles drive it, so fit and
+    // ticker-switch land on a legible price range around spot. The heaviest
+    // strikes still draw (top-N by |net GEX|, any distance); ones far from
+    // price sit off-screen until you drag the price axis out to reach them.
+    autoscaleInfoProvider: () => null,
   });
   const orbHalo = [];
   const orbCore = [];
@@ -208,7 +209,7 @@ export function createAtlasChart(container, flowContainer) {
   function renderOrbField() {
     const palette = cache.orbMode === 'delta'
       ? { pos: '102,187,106', neg: '239,83,80' }
-      : { pos: '38,166,154', neg: '126,87,194' }; // heatmap cell hues
+      : { pos: '38,152,134', neg: '150,60,170' }; // gex-replay-basic cell hues
     // Fixed pools of series (created under the candles at init); slots beyond
     // the current orb set are cleared, never removed.
     const orbs = cache.orbs.slice(0, orbCore.length);

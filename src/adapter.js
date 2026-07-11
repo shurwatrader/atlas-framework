@@ -41,10 +41,40 @@ async function fetchBundle(url) {
 }
 
 // Finest bar file available wins: 2m (matches the snapshot cadence; its
-// overnight stretch is 5m — no overnight 1m feed in the demo), else 5m.
+// overnight stretch is 5m, no overnight 1m feed in the demo), else 5m.
 async function fetchBars(symbol) {
   try { return await fetchJson(`data/bars/${symbol}_2m.json`); }
   catch { return fetchJson(`data/bars/${symbol}_5m.json`); }
+}
+
+// Candle timeframe the chart renders, in seconds. The demo bars are 2m (day)
+// and 5m (overnight); the board is moving to 10m, so we roll bars up to 10m.
+const BAR_SECONDS = 600;
+
+/**
+ * Roll bars up into fixed-width time buckets: open = first, high = max,
+ * low = min, close = last, volume = sum. Bars must be sorted by time. The
+ * bucket's timestamp is its start (a multiple of `seconds`), so orbs and
+ * levels still land on the grid via levels.snapToBar.
+ */
+export function aggregateBars(bars, seconds = BAR_SECONDS) {
+  const out = [];
+  let bucket = null, key = null;
+  for (const b of bars) {
+    const k = Math.floor(b.t / seconds) * seconds;
+    if (k !== key) {
+      if (bucket) out.push(bucket);
+      key = k;
+      bucket = { t: k, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v || 0 };
+    } else {
+      bucket.h = Math.max(bucket.h, b.h);
+      bucket.l = Math.min(bucket.l, b.l);
+      bucket.c = b.c;
+      bucket.v += b.v || 0;
+    }
+  }
+  if (bucket) out.push(bucket);
+  return out;
 }
 
 /** The parent repo's manifest, as-is: [{ slug, symbol, title, dates }]. */
@@ -73,7 +103,7 @@ export async function replayAdapter(symbol = 'MU') {
 
   return {
     symbol: bars.symbol ?? symbol,
-    bars: bars.bars,
+    bars: aggregateBars(bars.bars), // roll 2m/5m up to 10m candles
     frames,
     derivedFrom: bars.derivedFrom ?? null,
     note: bars.note ?? null,

@@ -65,7 +65,29 @@ header {
 }
 .tf.active, .tf:hover { color: var(--text); border-color: var(--border); background: rgba(139,147,167,0.08); }
 
-.toggles { display: flex; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.toggles { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+
+/* Expiry multi-select: compact date checkboxes that drive walls/GEX0/orbs/board */
+.expiries {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 11px;
+}
+.exp-label { color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+.exp-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text);
+  font-family: Consolas, monospace;
+  cursor: pointer;
+}
+.exp-item input { accent-color: var(--accent); cursor: pointer; }
 .chip {
   display: inline-flex;
   align-items: center;
