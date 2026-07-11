@@ -124,16 +124,22 @@ export function findGexZero(totals, spot) {
  *             "Movers" concept). Sign = direction of the change
  *             (building = +, draining = −). First frame has no delta.
  *
- * Strikes are ranked by session-peak strength in the chosen mode, top
- * maxStrikes kept. Pass range = {min, max} (the session's traded price
- * range, padded) to keep the field on strikes price can actually interact
- * with — without it the budget goes to far-OTM round strikes (600 / 1200 /
- * 2500 style OI magnets) that sit nowhere near a candle. Far structure
- * still shows via the level lines and the heatmap board.
+ * Strikes are ranked by peak strength in the chosen mode, top maxStrikes kept.
+ * Pass range = {min, max} (a padded price range) to keep the field on strikes
+ * price can actually interact with — without it the budget goes to far-OTM
+ * round strikes (600 / 1200 / 2500 style OI magnets) that sit nowhere near a
+ * candle. Far structure still shows via the level lines and the heatmap board.
+ *
+ * rankFrom (a unix-seconds time) ranks strikes by their peak strength AT OR
+ * AFTER that time, and drops strikes with no activity in that window. This
+ * ties the chosen strikes to the view actually on screen (e.g. the recent
+ * session), so overnight magnets whose orbs sit off to the left don't win the
+ * budget and leave the visible chart empty. Points themselves are still built
+ * across the whole session, so scrubbing back reveals their history.
  *
  * @returns [{ strike, points: [{ time, strength, sign }] }]
  */
-export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range = null, snapTo = null } = {}) {
+export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range = null, snapTo = null, rankFrom = null } = {}) {
   const perFrame = frames.map((frame) => {
     const raw = Math.floor(Date.parse(frame.capturedAt) / 1000);
     const time = snapTo ? snapToBar(raw, snapTo) : raw;
@@ -172,11 +178,14 @@ export function buildStrikeOrbs(frames, { maxStrikes = 14, mode = 'net', range =
   }
 
   return [...built.entries()]
-    .map(([strike, points]) => ({
-      strike,
-      points,
-      peak: Math.max(0, ...points.map((p) => p.strength)),
-    }))
+    .map(([strike, points]) => {
+      // Rank by peak strength within the ranking window (or the whole session
+      // when rankFrom is null). A strike with no points in the window ranks 0
+      // and drops out — that's how off-screen overnight magnets are excluded.
+      const inWindow = rankFrom == null ? points : points.filter((p) => p.time >= rankFrom);
+      return { strike, points, peak: Math.max(0, ...inWindow.map((p) => p.strength)) };
+    })
+    .filter((o) => o.peak > 0)
     .sort((a, b) => b.peak - a.peak)
     .slice(0, maxStrikes)
     .sort((a, b) => a.strike - b.strike)

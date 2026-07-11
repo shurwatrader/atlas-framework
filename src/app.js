@@ -3,10 +3,14 @@
  * replay transport (ported from gex-replay-basic: same controls, same keys).
  */
 import { replayAdapter, listSeries } from './adapter.js';
-import { buildLevelSeries, buildStrikeOrbs, parseValue } from './levels.js';
+import { buildLevelSeries, buildStrikeOrbs, parseValue, snapToBar } from './levels.js';
 import { createAtlasChart } from './chart.js';
 
 const $ = (sel) => document.querySelector(sel);
+
+// Bars framed in the default "optimal" view — ≈ one day of 2-min bars. The orb
+// field and the fit button both key off this so candles read at a legible size.
+const RECENT_BARS = 130;
 
 const state = {
   frames: [],
@@ -15,7 +19,7 @@ const state = {
   timer: null,
   lastTime: null,      // right edge of the bar series (secs)
   orbMode: 'net',
-  orbMin: 0.25,
+  orbCount: 6,          // how many of the heaviest strikes draw orbs (1–10)
   symbol: null,
   derivedFrom: null,
   note: null,
@@ -26,10 +30,16 @@ const atLive = () => state.frameIndex >= state.frames.length - 1;
 
 function renderOrbs(atlas) {
   atlas.setStrikeOrbs(
-    buildStrikeOrbs(state.frames, { mode: state.orbMode, range: state.orbRange, snapTo: state.barTimes }),
+    buildStrikeOrbs(state.frames, {
+      maxStrikes: state.orbCount,
+      mode: state.orbMode,
+      range: state.orbRange,
+      snapTo: state.barTimes,
+      rankFrom: state.orbRankFrom,
+    }),
     state.lastTime,
     state.orbMode,
-    state.orbMin
+    0 // strength clamp retired — the count control decides what shows
   );
 }
 
@@ -76,12 +86,15 @@ function showFrame(atlas, idx) {
 
 function play(atlas) {
   if (state.frames.length < 2) return;
-  if (atLive()) showFrame(atlas, 0); // replay from the top when already live
+  const fromLive = atLive();
+  if (fromLive) showFrame(atlas, 0); // replay from the top when already live
   state.playing = true;
-  atlas.freezeScale(true); // hold the view still while playing
   const btn = $('#playBtn');
   btn.textContent = '⏸';
   btn.classList.add('playing');
+  // Frame the replay start once so the action is on screen; after this the
+  // view stays put — the user can pan/zoom freely and hit ⤢ to re-center.
+  if (fromLive) atlas.frameRecent(RECENT_BARS);
   scheduleTick(atlas);
 }
 function scheduleTick(atlas) {
@@ -97,7 +110,6 @@ function scheduleTick(atlas) {
 function stop() {
   state.playing = false;
   clearTimeout(state.timer);
-  state.atlas?.freezeScale(false); // hand the axis back to adaptive autoscale
   const btn = $('#playBtn');
   btn.textContent = '▶';
   btn.classList.remove('playing');
@@ -112,16 +124,32 @@ async function loadSeries(atlas, symbol) {
   state.barTimes = bars.map((b) => b.t);
   const { levels } = buildLevelSeries(frames, { snapTo: state.barTimes });
 
-  // Orb field only covers strikes near where price actually traded (±5%);
-  // far-OTM OI magnets stay off the chart (they're on the board + levels).
-  let lo = Infinity, hi = -Infinity;
-  for (const b of bars) { if (b.l < lo) lo = b.l; if (b.h > hi) hi = b.h; }
-  state.orbRange = bars.length ? { min: lo * 0.95, max: hi * 1.05 } : null;
+  // The GEX scrape (levels + orbs) ends at the last snapshot, but the price
+  // bars run hours later (after-hours tape with no GEX). Anchor the default
+  // view and the orb field to that GEX coverage edge, not the last bar —
+  // otherwise the "recent" window lands entirely past the orbs and shows none.
+  const lastFrame = frames[frames.length - 1];
+  state.gexEndTime = lastFrame
+    ? snapToBar(Math.floor(Date.parse(lastFrame.capturedAt) / 1000), state.barTimes)
+    : state.lastTime;
+
+  // Show the heaviest strikes by |net GEX| regardless of distance from price
+  // (Atlas-style), positive or negative — no price-band filter. Rank by
+  // strength within the recent GEX window so the *current* structure wins the
+  // budget, then the chart fits whatever strikes are shown (orbs drive the
+  // price axis). Fewer strikes (the count control) = tighter range, bigger
+  // candles; more strikes reach further out and compress the candles.
+  let endIdx = bars.length - 1;
+  for (let i = 0; i < bars.length && bars[i].t <= state.gexEndTime; i++) endIdx = i;
+  const recent = bars.slice(Math.max(0, endIdx - RECENT_BARS + 1), endIdx + 1);
+  state.orbRange = null; // no distance filter — heaviest anywhere
+  state.orbRankFrom = recent[0]?.t ?? null; // rank strikes by recent activity
 
   atlas.setBars(bars);
   atlas.setLevels(levels, state.lastTime);
   renderOrbs(atlas);
-  atlas.fit();
+  atlas.setContentEnd(state.gexEndTime); // where GEX coverage ends
+  atlas.frameRecent(RECENT_BARS); // legible recent window, anchored to GEX coverage
 
   $('#symbol').textContent = symbol + (derivedFrom ? ` (derived ← ${derivedFrom})` : '');
   const firstDay = frames[0]?.tradingDay ?? '';
@@ -137,7 +165,6 @@ async function loadSeries(atlas, symbol) {
 
 async function main() {
   const atlas = createAtlasChart($('#chart'), $('#flow'));
-  state.atlas = atlas;    // so stop() can release the playback scale lock
   window.__atlas = atlas; // dev/debug handle
 
   // Ticker switcher straight from the gex-replay-basic manifest
@@ -176,28 +203,33 @@ async function main() {
   );
   togglesEl.appendChild(orbChip);
 
-  // Orb strength filter — the Orbs V2 "Min Clamp": hide nodes weaker than
-  // this fraction of the session's strongest node.
-  const minSel = document.createElement('select');
-  minSel.id = 'orbmin';
-  minSel.title = 'Minimum orb strength (fraction of the session’s strongest node)';
-  for (const [label, frac] of [['All orbs', 0], ['Strong ≥25%', 0.25], ['Heavy ≥50%', 0.5], ['Strongest ≥75%', 0.75]]) {
-    const opt = document.createElement('option');
-    opt.value = frac;
-    opt.textContent = label;
-    if (frac === state.orbMin) opt.selected = true;
-    minSel.appendChild(opt);
-  }
-  minSel.addEventListener('change', () => {
-    state.orbMin = parseFloat(minSel.value);
+  // Orb count — draw the N heaviest in-range strikes (ranked by session-peak
+  // strength). Replaces the old strength Min-Clamp: pick any number 1–10.
+  const countWrap = document.createElement('label');
+  countWrap.className = 'orbcount';
+  countWrap.title = 'How many of the heaviest strikes draw orbs';
+  const countVal = document.createElement('span');
+  countVal.className = 'orbcount-val';
+  countVal.textContent = `${state.orbCount} strikes`;
+  const countSlider = document.createElement('input');
+  countSlider.type = 'range';
+  countSlider.min = '1';
+  countSlider.max = '10';
+  countSlider.step = '1';
+  countSlider.value = String(state.orbCount);
+  countSlider.addEventListener('input', () => {
+    state.orbCount = parseInt(countSlider.value, 10);
+    countVal.textContent = `${state.orbCount} strike${state.orbCount === 1 ? '' : 's'}`;
     renderOrbs(atlas);
   });
-  togglesEl.appendChild(minSel);
+  countWrap.appendChild(countSlider);
+  countWrap.appendChild(countVal);
+  togglesEl.appendChild(countWrap);
 
   // Orb mode: Net (where structure sits) vs Δ Flow (money in/out per interval)
   const deltaChip = document.createElement('button');
   deltaChip.className = 'chip';
-  deltaChip.title = 'Orb mode: off = net GEX per strike, on = change vs previous snapshot (building green / draining red)';
+  deltaChip.title = 'Δ Flow: change in each strike’s net GEX vs the previous ~2-min snapshot (building green / draining red). Net snapshots can’t separate new money from offsetting flow.';
   deltaChip.innerHTML = '<span class="dot" style="background:rgba(102,187,106,0.9)"></span>Δ Flow';
   deltaChip.addEventListener('click', () => {
     state.orbMode = deltaChip.classList.toggle('on') ? 'delta' : 'net';
@@ -225,6 +257,10 @@ async function main() {
   $('#lastBtn').onclick = () => { stop(); showFrame(atlas, state.frames.length - 1); };
   $('#scrubber').oninput = () => { stop(); showFrame(atlas, +$('#scrubber').value); };
   $('#speedSelect').onchange = () => { if (state.playing) scheduleTick(atlas); };
+
+  // Optimal-view button (bottom-right of the chart): reframe to the legible
+  // recent window at any time, playing or paused.
+  $('#fitBtn').onclick = () => atlas.frameRecent(130);
 
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
